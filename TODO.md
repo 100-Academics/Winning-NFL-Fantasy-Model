@@ -1,7 +1,11 @@
-# TODO: NFL Fantasy Prediction Model
+# TODO: NFL Player Stat Projection Model
 
-Goal: predict per-player fantasy performance, e.g.
+Goal: predict per-player per-week **component stats**, e.g.
 "[Player xyz] will get 4.5 touchdowns and 202 yards."
+
+We predict the raw stat components (passing/rushing/receiving yards & TDs,
+receptions, targets, carries, etc.) and do NOT compute fantasy points here —
+that is a separate, later project.
 
 ## Phase 1 — Project setup
 
@@ -13,36 +17,49 @@ Goal: predict per-player fantasy performance, e.g.
 
 ## Phase 2 — Historical data acquisition
 
-- [ ] Choose a data source. Candidates:
-  - nfl_data_py (free, wraps nflfastR play-by-play + weekly rosters/stats) — recommended starting point
-  - nflfastR raw data feeds (downloadable season play-by-play CSVs)
-  - Sleeper/FantasyData/SportsDataIO APIs (fantasy points, some paid)
-- [ ] Install and pull historical weekly player stats (target: 2016–2025 seasons, or earlier)
+- [x] Choose a data source. Candidates:
+  - ~~nfl_data_py (free, wraps nflfastR play-by-play + weekly rosters/stats)~~ — **DEPRECATED** in favour of nflreadpy (confirmed via nfl_data_py README)
+  - **nflreadpy (current recommendation) — SELECTED.** Python port of nflreadr; downloads the same nflverse-data releases, Polars-backed, pip/uv-installable.
+  - Sleeper/FantasyData/SportsDataIO APIs (alternative stat/roster sources, some paid)
+- [x] Install and pull historical weekly player stats (target: 2016–2025 seasons, or earlier)
   - columns needed: player, team, position, week, season, passing_yards, passing_tds,
     rushing_yards, rushing_tds, receiving_yards, receiving_tds, receptions, targets,
-    carries, fantasy_points (PPR + standard)
-- [ ] Pull supporting context data:
-  - game schedules/results (opponent, home/away, Vegas spread/total)
-  - player usage: snap counts, target share, red-zone touches
-  - injuries/roster status changes (nflfastR has some; may need supplements)
-- [ ] Write a `src/download_data.py` script so the pull is reproducible
-- [ ] Save raw pulls to `data/raw/<season>_weekly.parquet` (parquet, not CSV — much smaller/faster)
+    carries — **all present** in `player_weekly_stats.parquet` (150 cols).
+    Note: nflverse names are abbreviated (e.g. `P.Mahomes`); use
+    `player_display_name` for human-facing output.
+- [x] Pull supporting context data:
+  - game schedules/results (opponent, home/away, Vegas spread/total) — `schedules.parquet` (opponent/home/away + scores, AND Vegas `spread_line`/`total_line`/moneylines + weather `temp`/`wind`/`roof`/`surface`)
+  - player usage: snap counts, target share, red-zone touches — `snap_counts.parquet`, `target_share` in player stats
+  - injuries/roster status changes (nflfastR has some; may need supplements) — `injuries.parquet`, `weekly_rosters.parquet`
+- [x] Write a `src/download_data.py` script so the pull is reproducible (resumable, `--force`, groups core/context/advanced)
+- [x] Save raw pulls to `data/raw/<season>_weekly.parquet` (parquet, not CSV — much smaller/faster)
+  - actual files: `player_weekly_stats.parquet`, `team_weekly_stats.parquet`, `schedules.parquet`,
+    `players.parquet`, `weekly_rosters.parquet`, `snap_counts.parquet`, `injuries.parquet`
 
 ## Phase 3 — Data cleaning & feature engineering
 
-- [ ] Clean and validate: dedupe player names across seasons, handle team changes,
-  fill/handle injury weeks, drop irrelevant positions or keep for flex decisions
-- [ ] Define the prediction target per player-week:
-  - fantasy_points (primary), plus component targets: passing yards/tds, rushing
-    yards/tds, receiving yards/tds — the output format needs each component
-- [ ] Build rolling features (avoid lookahead leakage! only use data from prior weeks):
-  - trailing 3-game and 5-game averages of usage and production
-  - season-to-date totals and per-game rates
-  - opponent defense strength vs position (rolling yards/tds/fantasy allowed)
-  - team implied total from Vegas line, home/away flag
-  - target share / air-yard share trends, red-zone opportunity rate
-- [ ] Write `src/features.py` with a `build_features(weekly_df) -> DataFrame` function
-- [ ] Sanity-check: no feature uses same-week or future information (add a test)
+- [x] Clean and validate: dedupe player names across seasons, handle team changes,
+  fill/handle injury weeks, drop irrelevant positions (e.g. OL/DT) or keep for analysis
+  - `src/clean.py` → `data/processed/panel.parquet`: REG-only, de-duped on
+    `(player_id, season, week)` (verified unique), nulls→0 for targets,
+    pre-game schedule context attached via `game_id`.
+- [x] Define the prediction target per player-week — the **stat components**:
+  passing yards/tds, rushing yards/tds, receiving yards/tds, receptions, targets,
+  carries. (Fantasy points are a separate, later project — NOT a target here.)
+  - Panel keeps ALL positions; the feature builder subsets to QB/RB/WR/TE/K.
+- [x] Build rolling features (avoid lookahead leakage! only use data from prior weeks):
+  - trailing 3-game and 5-game averages of usage and production → `_tr3`/`_tr5`
+  - season-to-date totals and per-game rates → `_s2d` (mean of prior games, 0 if none)
+  - opponent defense strength vs position (rolling yards allowed) → `total_yards_tr3_opp` etc.
+  - team implied total from Vegas line, home/away flag → `player_implied_total`, `signed_spread`, `home_flag`
+  - target share / air-yard share trends, red-zone opportunity rate → NGS trailing
+    (`ngs_completion_percentage_tr3`, `ngs_avg_cushion_tr3`, `ngs_avg_separation_tr3`, `ngs_efficiency_tr3`, …)
+- [x] Write `src/features.py` with a `build_features(...) -> DataFrame` function
+  (61,827 scoring rows × 96 cols, 0 NaNs)
+- [x] Sanity-check: no feature uses same-week or future information (add a test)
+  - `tests/test_no_lookahead.py`: perturbing a week's targets leaves that week's
+    trailing/momentum features unchanged; future-week perturb doesn't touch
+    prior weeks. 2 pass; proven non-vacuous (removing the `shift(1)` makes it fail).
 
 ## Phase 4 — Model
 
@@ -55,8 +72,9 @@ Goal: predict per-player fantasy performance, e.g.
   - Quantile regression (gradient boosting with quantile loss) for "4.5 tds"-style
     medians — gives a defensible central estimate + uncertainty bands
 - [ ] Tune hyperparameters on the validation split (small grid search is fine)
-- [ ] Evaluate on the test split: MAE per stat, and backtest as fantasy ranking
-  (would picking starters by predicted points have beaten baselines?)
+- [ ] Evaluate on the test split: MAE per stat, and a ranking backtest
+  (would ordering players by predicted stat have ranked the actual leaders better
+  than a naive baseline?)
 - [ ] Save trained models to `models/` (joblib) with a version/metadata file
 
 ## Phase 5 — Prediction output & CLI

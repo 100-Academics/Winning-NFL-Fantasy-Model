@@ -1,5 +1,14 @@
 # Working notes
 
+## Scope
+
+- We predict **per-player per-week stat components** (passing/rushing/receiving
+  yards & TDs, receptions, targets, carries, …). **Fantasy points are NOT a
+  target here** — that's a separate, later project that converts these
+  components. (User directive, 2026-09-29.)
+- nflverse ships `fantasy_points`/`fantasy_points_ppr` in the weekly stats —
+  fine to keep for sanity-checking, but don't build the model around them.
+
 ## Tooling
 
 - **Python environment: use `uv`.** No pip/venv/conda by hand — for any new
@@ -17,11 +26,36 @@
     nfl4th (4th-down analysis), nflreadr (downloads), nflplotR (viz).
 - Baselines to beat / use as sanity checks: **FantasyPros consensus**
   rankings & projections; ESPN, Yahoo, Sleeper projections.
-- Features that move the needle: **Vegas lines** (spread/total → implied
-  team totals; use as inputs, don't try to beat them), **weather**
-  (Open-Meteo, free historical), **injury reports/inactives**, snap counts,
-  route participation, **target share**, **red-zone usage**.
+- **Vegas lines AND weather ARE in nflverse** — the `schedules` release
+  carries `spread_line`, `total_line`, `away/home_moneyline`, `over/under_odds`,
+  plus `temp`, `wind`, `roof`, `surface`, `away/home_rest`. Use spread/total
+  as inputs (don't try to beat them).
+- Features that move the needle: **Vegas lines** (spread/total → implied team
+  totals), **weather** (temp/wind for passing games + kickers), **injury
+  reports/inactives**, snap counts, route participation, **target share**,
+  **red-zone usage**.
+- **nflverse player names are abbreviated** (e.g. `P.Mahomes`); use
+  `player_display_name` for human-facing output, `player_id` (e.g. `00-0033873`)
+  as the stable join key.
 - Pro Football Reference: supplementary historical + college stats;
   rate-limits scraping aggressively — use sparingly.
 - **Lookahead leakage is the #1 risk**: every feature must be computable
   strictly before the week being predicted.
+- **Polars `.over()` windows follow PHYSICAL ROW ORDER within each group, not
+  the `week` column.** Always `.sort([key..., "season", "week"])` BEFORE
+  applying `shift`/`rolling` `.over(...)`, or "trailing" silently uses the wrong
+  rows. (This bit us — the panel is not week-sorted, so the first feature pass
+  was leaking. Fixed by sorting first in every window site.)
+- **NextGen Stats (NGS) weekly values are post-game outcomes** (computed from
+  that week's games), so treat them as *trailing* (prior weeks) inputs, never
+  same-week — same leak rule as everything else.
+- **Team "points" can't be cleanly derived** from the team-stat TD columns:
+  those TD columns also count *opponent* scoring, so a score formula
+  (7×TD + 3×FG + …) doesn't reconcile to the final score. Use **team total
+  yards** as the offense/defense-strength proxy instead (robust, no
+  reconciliation).
+- **Momentum must be prior-only**: `value[W-1] - value[W-2]`, NOT
+  `value[W] - value[W-1]` (the latter uses the current week = the target).
+- **nflverse `game_id` is a clean join key** across player/team/schedules (0
+  orphans). Team `(season,week,team)` is unique in team stats. Join on
+  `game_id`, not on `(season,week)` (that fans out across the week's games).

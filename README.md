@@ -1,12 +1,24 @@
 # Winning-NFL-Fantasy-Model
 
-A prediction model for **NFL fantasy football**, built to estimate the fantasy points a player is likely to score in a given week so lineups can be set with an edge.
+A prediction model for **NFL player performance**: it estimates the **stat
+components** a player is likely to post in a given week — e.g.
+"Patrick Mahomes will get ~2.1 touchdowns and ~268 passing yards."
+
+We predict the raw stats (passing/rushing/receiving yards & TDs, receptions,
+targets, carries, …). **Fantasy points are a separate, later project** that
+converts these components — this repo does not score them.
 
 ## What it does
 
-- Consumes historical and current-season player performance data.
-- Produces per-player fantasy point projections for lineup optimization.
+- Consumes historical NFL data (nflverse, 2016–2025) plus per-game context
+  (opponent, Vegas line, weather, injuries, usage).
+- Produces per-player per-week projections of individual stat components,
+  with uncertainty bands.
 
 ## Status
 
-Early stage — the repo is a skeleton and the data pipeline, model, and evaluation haven't been implemented yet. See `TODO.md` for the planned work.
+- **Phase 1 (setup)** and **Phase 2 (data acquisition)** are done — the raw
+  data is mirrored to `data/raw/` and a reproducible downloader lives in
+  `src/download_data.py`.
+- Phases 3–6 (cleaning/features, modeling, prediction CLI, polish) are still
+  to come. See `TODO.md` for the full plan.
