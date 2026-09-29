@@ -63,19 +63,35 @@ that is a separate, later project.
 
 ## Phase 4 — Model
 
-- [ ] Baseline first: predict trailing 3-game average (or last game) as the naive forecast.
+- [x] Baseline first: predict trailing 3-game average (or last game) as the naive forecast.
   Measure MAE/RMSE per stat — the model must beat this to be worth anything.
-- [ ] Split data chronologically: train on earlier seasons, validate on a held-out
+  - `src/model.py` builds two baselines per position-stat: `last_game` (player's
+    own prior-week value) and `trailing3`.
+- [x] Split data chronologically: train on earlier seasons, validate on a held-out
   mid-season, test on the most recent season(s). NEVER random splits (time leakage).
-- [ ] Train candidate models per target stat (or one multi-output model):
+  - **train 2016–2022 | val 2023 | test 2024–2025.**
+- [x] Train candidate models per target stat (or one multi-output model):
   - Gradient boosting: XGBoost / LightGBM / sklearn HistGradientBoosting
+    → **`HistGradientBoostingRegressor(loss="quantile")`** (sklearn, no new deps).
   - Quantile regression (gradient boosting with quantile loss) for "4.5 tds"-style
     medians — gives a defensible central estimate + uncertainty bands
-- [ ] Tune hyperparameters on the validation split (small grid search is fine)
-- [ ] Evaluate on the test split: MAE per stat, and a ranking backtest
+    → headline stats also get p10/p90 band models (calibrated: 74–89% of actuals
+      land inside the 80% band).
+- [x] Tune hyperparameters on the validation split (small grid search is fine)
+  - grid over max_iter {150,300,500} × lr {0.03,0.06} × depth {3,5} × l2 {1,5};
+    `--quick` flag for a fast smoke test. Full grid ≈ 2m50s for all 14 models.
+- [x] Evaluate on the test split: MAE per stat, and a ranking backtest
   (would ordering players by predicted stat have ranked the actual leaders better
   than a naive baseline?)
-- [ ] Save trained models to `models/` (joblib) with a version/metadata file
+  - **All 14/14 position-stats beat BOTH baselines on MAE.** Ranking (Spearman)
+    is strong on the headline stats: RB rushing 0.77, WR rec 0.76/0.71,
+    TE rec 0.69/0.66, QB passing 0.60. TD/INT counts (sparse, near-zero) have
+    NaN Spearman — expected, low-signal.
+- [x] Save trained models to `models/` (joblib) with a version/metadata file
+  - `models/models.joblib` (all 14 models + p10/p90 bands + meta) and
+    `models/eval_report.json` (per-stat metrics, best params, baselines).
+  - Verified: reload from disk → predictions identical (max diff 0.0), MAE 52.78
+    matches the report.
 
 ## Phase 5 — Prediction output & CLI
 

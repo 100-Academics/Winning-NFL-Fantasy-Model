@@ -59,3 +59,13 @@
 - **nflverse `game_id` is a clean join key** across player/team/schedules (0
   orphans). Team `(season,week,team)` is unique in team stats. Join on
   `game_id`, not on `(season,week)` (that fans out across the week's games).
+- **Model (Phase 4):** per (position, target) use
+  `sklearn.ensemble.HistGradientBoostingRegressor(loss="quantile")` — fast
+  (~0.7s/fit), no extra deps. Split train 2016–22 / val 2023 / test 2024–25.
+  All 14 position-stats beat the last-game & trailing-3 baselines on test MAE;
+  Spearman 0.60–0.77 on headline yardage stats. Headline stats get p10/p90 band
+  models (74–89% of actuals inside the 80% band). Saved to `models/models.joblib`
+  + `models/eval_report.json`.
+- **Gotcha:** `df.select([...]).to_numpy()` on a single-column frame returns
+  shape (n,1) → broadcast-bugs against (n,) predictions when computing MAE
+  (n×n). Use `.to_series().to_numpy()` for y-vectors, or ravel.
