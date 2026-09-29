@@ -21,8 +21,12 @@ Run:
 from __future__ import annotations
 
 import pathlib
+import sys
 
 import polars as pl
+
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8")
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
 RAW_DIR = REPO_ROOT / "data" / "raw"

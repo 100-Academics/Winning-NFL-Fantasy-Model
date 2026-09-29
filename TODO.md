@@ -120,9 +120,17 @@ that is a separate, later project.
 
 ## Phase 6 — Polish & documentation
 
-- [ ] README: setup, data pull, training, prediction usage
-- [ ] Notebook with exploratory analysis + model evaluation charts
-- [ ] Record known limitations (injury uncertainty, rookies, weather, OL changes)
+- [x] README: setup, data pull, training, prediction usage
+  - Full rewrite with verified numbers (14/14 beat baseline, MAE table), CLI
+    examples, `uv` setup instructions, and tests section.
+- [x] Notebook with exploratory analysis + model evaluation charts
+  - `notebooks/explore_model.py` → `notebooks/charts/`: test MAE vs baselines
+    (grouped bars), predicted-vs-actual scatter (QB passing_yards, WR
+    receiving_yards), and per-target ranking quality (Spearman).
+- [x] Record known limitations (injury uncertainty, rookies, weather, OL changes)
+  - README "Known limitations": injuries, rookies (rookie path under dev),
+    conservative TD projections, shrinkage in receiving yards, OL changes,
+    Vegas-as-input.
 
 ## Notes / gotchas
 
