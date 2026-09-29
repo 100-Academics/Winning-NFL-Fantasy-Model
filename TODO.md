@@ -118,6 +118,57 @@ that is a separate, later project.
     summary. Verified weeks 5 & 10 (2024): top-10 board headline MAE ≈ 28–35,
     consistent with the Phase 4 test-split MAE.
 
+## Phase 5.5 — Rookie handling (prior + shrinkage)
+
+*Why before Phase 6:* the main model predicts from trailing form. A true rookie
+has NO trailing form, so it degenerates to a league-average guess and can't
+rank rookies well. This phase adds a rookie **prior** (from draft capital +
+college + combine + age) and blends it in with shrinkage, so more NFL games
+earn more weight. This matters for beating current models in Phase 6.
+
+- [x] Add `cfbd` (CollegeFootballData) as a dependency; API key goes in `.env`
+  (gitignored) via `.env.example`. Key is read by `src/cfbd_client.py`.
+  - Gotcha: cfbd 4.5.2 auth = `cfg.api_key["Authorization"]=key` +
+    `cfg.api_key_prefix["Authorization"]="Bearer"`. APIs return LISTS of model
+    objects (not DataFrames).
+- [x] `src/cfbd_client.py`: cached pull of CFBD `draft_picks`,
+  `player_season_stats`, `player_usage` (2016–2025 drafts; college 2014–2024)
+  into `data/raw/cfbd/`.
+- [x] `src/rookie_features.py`: join the CFBD draft bridge (name →
+  college_athlete_id) + college rate/volume stats + CFBD usage + nflverse
+  combine + pre-draft grade + age-at-draft into one per-player static table
+  (`data/processed/rookie_features.parquet`). All pre-season — no lookahead.
+  - Verified: first-round 2024 picks (Williams 97, Daniels 94, Nabers 95) match
+    nflverse with correct round/pick + age, and carry their 2023 college stats.
+- [x] `src/rookie_model.py`: per (position, target) `HistGradientBoosting`
+  regressors trained on FIRST-SEASON player-weeks (pooled 2016–2022), val 2023,
+  test 2024–25. Predicts the SAME per-week components as the main model.
+  → `models/rookie_prior.joblib` + `models/rookie_prior_report.json`.
+  - Trained: 14 models, 1,070 rookies / 10,691 first-season weeks
+    (2024 test MAE: QB pass yds 72.9, RB rush yds 22.7, WR recv yds 19.5).
+- [x] Wire shrinkage into `src/predict.py`: for a player in their rookie season,
+  `final = w·main + (1−w)·prior` with `w = games_played/(games_played+K)`.
+  Output shows a `[ROOKIE — rookie-prior blend]` line with the main-vs-prior
+  split. `--no-rookie` disables it. (Graceful: if the prior isn't trained, the
+  main model is used unchanged.)
+- [x] Tune K (shrinkage strength). Swept K ∈ {0.1 … 12} per (pos, target),
+  chosen on 2023 rookies (val), scored on 2024+2025 (test):
+  - K=4 (old default) hurts: 6.89 / 6.59 test MAE. Uniform K=0.5 wins both
+    test seasons: 6.37 / 6.17. Per-target K selection is within 0.04 of it,
+    so uniform K=0.5 is kept (less to overfit).
+  - The rookie prior helps mostly week-1 (its purpose) and only for some
+    targets — WR receiving yards and RB receiving/receptions benefit; QB
+    passing and RB rushing week-1 are better served by the main model.
+    Position/tier (1st round vs later) optima flip by target and aren't
+    stable across seasons → no per-tier K yet.
+- [x] End-to-end verified (week-1 2024, `--compare`):
+  - Jayden Daniels (QB): blend 193 yds vs main 237; actual 184 → prior was right.
+  - Caleb Williams (QB): blend 211 vs main 247; actual 93 (prior closer).
+  - Cam Ward (QB, 2025 w1): main only 49 yds, prior 220, actual 112 — the
+    prior rescues the league-average collapse for zero-form rookies.
+  - Week 6 (5 games played): blend is 91% main / 9% prior — shrinkage
+    hands off to actual NFL form as designed.
+
 ## Phase 6 — Polish & documentation
 
 - [x] README: setup, data pull, training, prediction usage

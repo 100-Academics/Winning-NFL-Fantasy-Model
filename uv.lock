@@ -192,6 +192,21 @@ wheels = [
 ]
 
 [[package]]
+name = "cfbd"
+version = "4.5.2"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "certifi" },
+    { name = "python-dateutil" },
+    { name = "six" },
+    { name = "urllib3" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/ca/cc/e3da4f6d2096ed372450e1c3dfb9f113c1c69c4dee5d5c27642ca09fe510/cfbd-4.5.2.tar.gz", hash = "sha256:87acb08d8f4283df060a43a711d33b8c6b15ab2732a35aeee908e21c0ae14a7b", size = 113253, upload-time = "2023-12-09T01:02:26.873Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/0d/40/9fc01162f087b374b24a24e48a2a30626c69166e19f0eb69f9fcbbf73860/cfbd-4.5.2-py3-none-any.whl", hash = "sha256:64cc5ab1c08b55945cdde3f4c2d19c38db2d96ff4ad247f50811b4a6492f21e4", size = 358843, upload-time = "2023-12-09T01:02:24.298Z" },
+]
+
+[[package]]
 name = "cffi"
 version = "2.1.1"
 source = { registry = "https://pypi.org/simple" }
@@ -3149,6 +3164,7 @@ name = "winning-nfl-fantasy-model"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
+    { name = "cfbd" },
     { name = "joblib" },
     { name = "jupyter" },
     { name = "matplotlib" },
@@ -3175,6 +3191,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "cfbd", specifier = ">=4.5.2" },
     { name = "joblib", specifier = ">=1.3" },
     { name = "jupyter", specifier = ">=1.1" },
     { name = "matplotlib", specifier = ">=3.8" },

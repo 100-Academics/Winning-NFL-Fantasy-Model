@@ -46,6 +46,8 @@ from src.model import (
 )
 from src.clean import PROCESSED_DIR
 
+REPO_ROOT = PROCESSED_DIR.parent.parent
+
 # Human phrasing per position: (target, label)
 PHRASE: dict[str, list[tuple[str, str]]] = {
     "QB": [("passing_tds", "passing TDs"),
@@ -89,6 +91,40 @@ def _load_features() -> pl.DataFrame:
             f"features not found at {path}. Run `python -m src.features` first (Phase 3)."
         )
     return pl.read_parquet(path)
+
+
+# --------------------------------------------------------------------------- #
+# Rookie prior (Phase 5.5) — shrinkage blend
+# --------------------------------------------------------------------------- #
+def _load_rookie_prior() -> dict | None:
+    """Load the rookie prior model + static feature table, if present.
+
+    Returns {"models": {pos/target: HGBR}, "feat_cols": [...], "table": df} or
+    None if Phase 5.5 hasn't been run yet (main model still used as-is).
+    """
+    import joblib
+    p = MODELS_DIR / "rookie_prior.joblib"
+    t = PROCESSED_DIR / "rookie_features.parquet"
+    if not (p.exists() and t.exists()):
+        return None
+    payload = joblib.load(p)
+    table = pl.read_parquet(t)
+    feat_cols = payload["meta"]["feature_columns"]
+    return {"models": payload["models"], "feat_cols": feat_cols, "table": table}
+
+
+def _games_played_before(feat: pl.DataFrame, season: int, week: int) -> pl.DataFrame:
+    """For each (player_id, season, week) in the current week, count the player's
+    prior weeks in that season (their NFL games so far). Used for the shrinkage
+    weight: w = games / (games + K)."""
+    week_rows = feat.filter((pl.col("season") == season) & (pl.col("week") == week))
+    prior = feat.filter((pl.col("season") == season) & (pl.col("week") < week))
+    counts = (prior.group_by(["player_id", "season"])
+              .agg(pl.len().alias("games_played")))
+    out = (week_rows.select(["player_id", "season", "week"])
+           .join(counts, on=["player_id", "season"], how="left")
+           .with_columns(pl.col("games_played").fill_null(0)))
+    return out
 
 
 # --------------------------------------------------------------------------- #
@@ -180,9 +216,52 @@ def _head_error_stats(entries: list[dict]) -> dict:
     return {"n": len(errs), "mae": round(mae, 2), "rmse": round(rmse, 2)}
 
 
+def _prior_predict(rec: dict, prior: dict, pos: str) -> dict[str, float] | None:
+    """Predict a rookie's per-week stat components from their static prior
+    features (draft capital, college, combine, age, pre-draft grade). Returns
+    {target: value} for targets that have a rookie model, else None."""
+    table = prior["table"]
+    row = table.filter(pl.col("player_id") == rec["player_id"])
+    if row.height == 0:
+        return None
+    r = row.to_dicts()[0]
+    X = np.array([0.0 if r.get(c) is None else float(r.get(c))
+                  for c in prior["feat_cols"]], dtype=np.float32).reshape(1, -1)
+    out = {}
+    for target in POS_TARGETS.get(pos, []):
+        m = prior["models"].get(f"{pos}/{target}")
+        if m is not None:
+            out[target] = float(m.predict(X)[0])
+    return out or None
+
+
 def _build_prediction(rec: dict, payload: dict, feat_cols: list[str],
-                      compare: bool) -> dict:
+                      compare: bool, prior: dict | None = None,
+                      games_played: int = 0, is_rookie: bool = False) -> dict:
     p = _predict_row(rec, payload, feat_cols)
+    main_preds = dict(p["preds"])
+
+    # Phase 5.5 shrinkage: for a rookie in their first season, blend the main
+    # model with the rookie prior. Weight w = games/(games+K): week 1 leans on
+    # the prior; more NFL games => more weight on the main model.
+    # K was tuned per-target on the 2023 rookie season (val); uniform K=0.5
+    # won on 2024 AND 2025 test (6.37/6.17 MAE vs 6.89/6.59 at K=4).
+    rookie_blend = None
+    if prior is not None and is_rookie:
+        prior_preds = _prior_predict(rec, prior, rec["position"])
+        if prior_preds:
+            K = 0.5
+            w = games_played / (games_played + K)
+            blended = {t: w * main_preds[t] + (1 - w) * prior_preds[t]
+                       for t in main_preds if t in prior_preds}
+            p["preds"] = blended
+            rookie_blend = {
+                "w_main": round(w, 3),
+                "main": {t: round(main_preds[t], 2) for t in blended},
+                "prior": {t: round(prior_preds[t], 2) for t in blended},
+                "games_played": games_played,
+            }
+
     entry = {
         "player": rec["player_display_name"],
         "position": rec["position"],
@@ -195,6 +274,9 @@ def _build_prediction(rec: dict, payload: dict, feat_cols: list[str],
         "bands": p["bands"],
         "sentence": None,
     }
+    if rookie_blend is not None:
+        entry["rookie"] = True
+        entry["rookie_blend"] = rookie_blend
     if compare:
         actuals = {t: float(rec[t]) for t in p["preds"] if t in rec and rec[t] is not None}
         entry["actuals"] = actuals
@@ -225,6 +307,13 @@ def _refresh(season: int) -> None:
 # --------------------------------------------------------------------------- #
 # Main
 # --------------------------------------------------------------------------- #
+def _rookie_seasons() -> dict:
+    """player_id -> rookie_season (first NFL season), from the players table."""
+    p = pl.read_parquet(REPO_ROOT / "data" / "raw" / "players.parquet")
+    m = p.select([pl.col("gsis_id").alias("player_id"), "rookie_season"])
+    return {r["player_id"]: r["rookie_season"] for r in m.iter_rows(named=True)}
+
+
 def run(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -242,6 +331,8 @@ def run(argv: list[str] | None = None) -> int:
     ap.add_argument("--refresh", action="store_true",
                     help="re-pull the season's data + rebuild features first "
                          "(for upcoming weeks)")
+    ap.add_argument("--no-rookie", action="store_true",
+                    help="disable the Phase 5.5 rookie-prior shrinkage blend")
     args = ap.parse_args(argv)
 
     if not args.players and not args.all:
@@ -253,6 +344,14 @@ def run(argv: list[str] | None = None) -> int:
     payload = _load_payload()
     feat_cols = payload["meta"]["feature_columns"]
     feat = _load_features()
+
+    # Phase 5.5: load the rookie prior (if trained) + rookie-season map.
+    prior = None if args.no_rookie else _load_rookie_prior()
+    rookie_map = {} if args.no_rookie else _rookie_seasons()
+    games = _games_played_before(feat, args.season, args.week)
+    games_by_player = {r["player_id"]: r["games_played"]
+                       for r in games.iter_rows(named=True)}
+
     rows = _select_rows(feat, args.season, args.week,
                         args.players if args.players else None,
                         args.all, args.top)
@@ -267,7 +366,11 @@ def run(argv: list[str] | None = None) -> int:
 
     entries = []
     for r in rows.iter_rows(named=True):
-        entry = _build_prediction(r, payload, feat_cols, args.compare)
+        is_rookie = (prior is not None
+                     and rookie_map.get(r["player_id"]) == args.season)
+        gp = games_by_player.get(r["player_id"], 0)
+        entry = _build_prediction(r, payload, feat_cols, args.compare,
+                                  prior=prior, games_played=gp, is_rookie=is_rookie)
         entry["sentence"] = _phrase(entry["position"], entry["preds"], entry["bands"])
         entries.append(entry)
 
@@ -304,8 +407,16 @@ def run(argv: list[str] | None = None) -> int:
                   file=sys.stderr)
     for e in entries:
         venue = f"{e['team']} {'vs' if e['home'] else '@'} {e['opponent']}"
-        print(f"\n{e['player']} ({e['position']}, {venue}) — Week {e['week']}, {e['season']}")
+        tag = "  [ROOKIE — rookie-prior blend]" if e.get("rookie") else ""
+        print(f"\n{e['player']} ({e['position']}, {venue}) — Week {e['week']}, {e['season']}{tag}")
         print(f"  {e['sentence']}")
+        if e.get("rookie_blend") is not None:
+            rb = e["rookie_blend"]
+            head = RANK_STAT.get(e["position"], "passing_yards")
+            if head in rb["main"]:
+                print(f"  blend: {rb['w_main']:.0%} main / "
+                      f"{1-rb['w_main']:.0%} rookie-prior ({rb['games_played']} prior games) — "
+                      f"{head}: main {rb['main'][head]} vs prior {rb['prior'][head]}")
         if e.get("actuals") is not None:
             act = ", ".join(f"{_fmt_num(v, s)} {s.replace('_',' ')}"
                             for s, v in e["actuals"].items())
