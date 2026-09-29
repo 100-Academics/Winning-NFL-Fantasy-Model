@@ -1,6 +1,6 @@
 # Winning-NFL-Fantasy-Model
 
-A prediction model for fantasy baseball, built to estimate the fantasy points a player is likely to score in a given week so lineups can be set with an edge.
+A prediction model for **NFL fantasy football**, built to estimate the fantasy points a player is likely to score in a given week so lineups can be set with an edge.
 
 ## What it does
 

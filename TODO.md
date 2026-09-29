@@ -5,11 +5,11 @@ Goal: predict per-player fantasy performance, e.g.
 
 ## Phase 1 — Project setup
 
-- [ ] Set up Python environment (venv or conda), pin Python 3.11+
-- [ ] Install core libs: pandas, numpy, scikit-learn, matplotlib, jupyter
-- [ ] Create directory layout: `data/raw`, `data/processed`, `src`, `notebooks`, `models`
-- [ ] Add `.gitignore` (exclude `data/raw`, `models/`, venv dirs)
-- [ ] Add `requirements.txt` or `pyproject.toml` and keep it updated
+- [x] Set up Python environment (venv or conda), pin Python 3.11+
+- [x] Install core libs: pandas, numpy, scikit-learn, matplotlib, jupyter
+- [x] Create directory layout: `data/raw`, `data/processed`, `src`, `notebooks`, `models`
+- [x] Add `.gitignore` (exclude `data/raw`, `models/`, venv dirs)
+- [x] Add `requirements.txt` or `pyproject.toml` and keep it updated
 
 ## Phase 2 — Historical data acquisition
 
