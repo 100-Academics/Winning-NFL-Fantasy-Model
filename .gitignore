@@ -1,0 +1,41 @@
+# --- Python ---
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+
+# --- uv ---
+# Keep the lockfile (reproducible installs); ignore uv's per-machine cache dir if present.
+!.uv/
+.uv/cache/
+
+# --- Jupyter ---
+.ipynb_checkpoints/
+*.ipynb_checkpoints/
+
+# --- Data: keep the layout (via .gitkeep), exclude the bulky artifacts ---
+# Raw pulls are re-fetchable from their sources (see src/download_data.py).
+data/raw/*
+!data/raw/.gitkeep
+data/processed/*
+!data/processed/.gitkeep
+
+# Trained model artifacts (rebuilt by src/train.py) — keep the folder itself.
+models/*
+!models/.gitkeep
+
+# --- OS / editor cruft ---
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+
+# --- Secrets / local env ---
+.env
+.env.*
