@@ -25,8 +25,11 @@ data = [
 ]
 
 [project.scripts]
-# Wired up in Phase 5 once src/predict.py exists.
-# predict = "src.predict:main"
+# Phase 5: human-readable per-player projections.
+#   predict --season 2024 --week 5 --players "Patrick Mahomes"
+#   predict --season 2024 --week 5 --all --top 15
+#   predict --season 2026 --week 6 --all --refresh
+predict = "src.predict:main"
 
 [build-system]
 requires = ["setuptools>=68"]

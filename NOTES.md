@@ -69,3 +69,17 @@
 - **Gotcha:** `df.select([...]).to_numpy()` on a single-column frame returns
   shape (n,1) → broadcast-bugs against (n,) predictions when computing MAE
   (n×n). Use `.to_series().to_numpy()` for y-vectors, or ravel.
+- **Prediction CLI (Phase 5):** `src/predict.py` (also the `predict` console
+  script). Predicts any (season, week) present in `data/processed/features.parquet`.
+  `--players` does a case-insensitive substring match on
+  `player_display_name`. `--all` ranks a board by the model's **predicted**
+  headline stat (not trailing form) and slices top N per position. `--compare`
+  uses the same row's actual target columns (present only for in-data weeks) and
+  prints a headline MAE/RMSE summary. `--refresh` re-pulls the current + prior
+  season and rebuilds features for upcoming weeks.
+  - **Gotcha:** in this polars build `str.contains(..., ignore_case=True)` is
+    unsupported, and `pl.any([...])` is a column-aggregation (not an OR).
+    Match by lower-casing both sides + `literal=True`, and OR masks with `|`.
+  - **Gotcha:** a `(season, week)` row with no production for the target (e.g. a
+    player out that week) is still a valid prediction row — don't treat "player
+    not found" as a data error when the week itself has other rows.

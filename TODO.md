@@ -95,14 +95,28 @@ that is a separate, later project.
 
 ## Phase 5 — Prediction output & CLI
 
-- [ ] Write `src/predict.py`: input = week/season + player list (or "all"), output =
+- [x] Write `src/predict.py`: input = week/season + player list (or "all"), output =
   formatted lines like "Patrick Mahomes will get 2.1 touchdowns and 268 yards."
   - map model outputs back to the human phrasing per stat component
+    → per-position phrasing (`PHRASE`): QB "X passing TDs … Y passing yards … Z
+    interceptions", RB/WR/TE "X rushing/receiving yards, … TDs, … receptions".
   - include a confidence note (quantile spread) when available
-- [ ] Add a simple CLI entry point (`python -m src.predict --week 5 --season 2026`)
-- [ ] Handle upcoming-week inputs: fetch current rosters + Vegas lines for the week,
+    → headline stats show `(p10-p90)` band, e.g. "236 passing yards (136-323)".
+- [x] Add a simple CLI entry point (`python -m src.predict --week 5 --season 2026`)
+  - `python -m src.predict --season 2024 --week 5 --players "Patrick Mahomes"`
+  - `predict --season 2024 --week 5 --all --top 15` (ranked board, top N per position,
+    ranked by the model's **predicted** headline stat)
+  - `predict --season 2024 --week 5 --all --compare --json`
+  - also registered as the `predict` console script in `pyproject.toml`.
+- [x] Handle upcoming-week inputs: fetch current rosters + Vegas lines for the week,
   build features from latest available data
-- [ ] End-to-end test: run prediction for a past week and compare against actuals
+  - `--refresh` re-pulls the current season (and the prior, for trailing context)
+    via `src.download_data` then rebuilds features via `src.features.build_features`.
+    Bounded test: 2025 re-pull + feature rebuild ≈ 2.5s, features stay intact.
+- [x] End-to-end test: run prediction for a past week and compare against actuals
+  - `--compare` prints ACTUAL + ERROR per stat and a headline-stat MAE/RMSE
+    summary. Verified weeks 5 & 10 (2024): top-10 board headline MAE ≈ 28–35,
+    consistent with the Phase 4 test-split MAE.
 
 ## Phase 6 — Polish & documentation
 
