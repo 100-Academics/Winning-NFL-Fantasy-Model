@@ -49,8 +49,14 @@ import joblib
 import numpy as np
 import polars as pl
 
-# Standard 1-PPR scoring + the PPR converter — identical to src.bench.
-from src.bench import SCORE, _ppr
+# Standard 1-PPR scoring — identical to src.bench (self-contained so this
+# diagnostic doesn't depend on the bench module being present).
+SCORE = {
+    "passing_yards": 0.1, "rushing_yards": 0.1, "receiving_yards": 0.1,
+    "passing_tds": 6.0, "rushing_tds": 6.0, "receiving_tds": 6.0,
+    "receptions": 1.0,
+    "passing_interceptions": -2.0,
+}
 from src.clean import PROCESSED_DIR
 from src.model import POS_TARGETS, MODELS_DIR
 

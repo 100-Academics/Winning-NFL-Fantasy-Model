@@ -140,10 +140,12 @@ def train_one(pos, target, data, feat_cols, quick):
     Xva, yva = _xy(va, feat_cols, target) if va.height else (None, None)
     Xte, yte = _xy(te, feat_cols, target)
 
-    # grid search on val (median quantile); fall back to train error if no val
+    # grid search on val (squared_error = conditional MEAN — the
+    # calibration-correct central estimate; the median under-projects
+    # zero-inflated stats, see src.model docstring). Fall back to train error.
     best = None
     for params in _grid(quick):
-        m = HGBR(loss="quantile", quantile=0.5, random_state=0, **params)
+        m = HGBR(loss="squared_error", random_state=0, **params)
         m.fit(Xtr, ytr)
         if Xva is not None and yva is not None and len(yva):
             score = float(np.abs(m.predict(Xva) - yva).mean())
@@ -151,7 +153,7 @@ def train_one(pos, target, data, feat_cols, quick):
             score = _mae(m.predict(Xtr), ytr)
         if best is None or score < best[0]:
             best = (score, params)
-    m = HGBR(loss="quantile", quantile=0.5, random_state=0, **best[1])
+    m = HGBR(loss="squared_error", random_state=0, **best[1])
     m.fit(Xtr, ytr)
     pred = m.predict(Xte)
     return {
@@ -159,6 +161,7 @@ def train_one(pos, target, data, feat_cols, quick):
         "n_train": len(ytr), "n_val": len(yva) if yva is not None else 0, "n_test": len(yte),
         "best_params": best[1], "val_mae": best[0],
         "test_mae": _mae(pred, yte), "test_rmse": _rmse(pred, yte),
+        "test_signed_bias": float(pred.mean() - yte.mean()),
         "model": m,
     }
 

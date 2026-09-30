@@ -56,12 +56,19 @@ uv run python -m src.model --quick   # fast smoke test
 ```
 
 - Split is **chronological**: train 2016–2022 | val 2023 | test 2024–2025.
-- Model: `HistGradientBoostingRegressor` with quantile loss per
-  (position, stat); compared against naive baselines (last game, trailing
-  3-game average). On the test split **all 14 models beat both baselines** —
-  e.g. QB passing yards MAE 52.8 vs 74.8 baseline.
+- Model: `HistGradientBoostingRegressor` per (position, stat). The **central
+  estimate fits the conditional MEAN** (`loss="squared_error"`) — a median
+  (quantile-0.5) systematically under-projects these right-skewed, zero-inflated
+  stats (measured: RB/WR/TE 30–40% low, TDs collapsed to 0) and breaks the
+  linearity needed for cross-position (flex) ranking. **p10/p90 bands** stay
+  quantile models. Compared against naive baselines (last game, trailing
+  3-game average): **10/14 position-stats beat both on test MAE** — the 4 that
+  don't are the ultra-sparse TD/INT counts where "last week was 0" is a strong
+  null. Headline yardage stats win clearly, e.g. QB passing yards MAE 55.0 vs
+  74.8 baseline.
 - Artifacts: `models/models.joblib` (models + p10/p90 band models + metadata)
-  and `models/eval_report.json`.
+  and `models/eval_report.json`. Calibration/signed-bias:
+  `uv run python -m src.calibrate` → `models/calibration_report.json`.
 
 ## Prediction CLI (Phase 5)
 
@@ -106,9 +113,14 @@ unchanged, and the test is non-vacuous — removing the `shift(1)` makes it fail
 - **Rookies**: first-year players have little or no trailing history, so
   features collapse to zeros; a dedicated rookie path (CollegeFootballData)
   is under development.
-- **TD predictions are conservative**: all predicted TDs land ~0.0–0.5
-  (TDs are rare, high-variance events); use the p10–p90 bands, and treat
-  TD projections as directional.
+- **TD projections**: TDs are rare, high-variance events; we now fit the
+  conditional **mean** (not the median) so per-week TD expectations are
+  calibrated (~0.1–1.3 depending on position/volume) instead of collapsing to
+  0. Treat them as directional and lean on the p10–p90 bands.
+- **Sparse-count MAE**: the ultra-sparse TD/INT count stats (receiving TDs,
+  QB INTs) no longer beat the "last week was 0" null on raw MAE — fitting the
+  mean trades a little MAE for correct calibration, which is the right call
+  for flex decisions (see `src/calibrate.py`).
 - **Shrinkage**: per-week receiving-yard projections compress toward the
   position mean (~50–66 yards for WR/TE); ranking by predicted value is more
   reliable than the absolute number.

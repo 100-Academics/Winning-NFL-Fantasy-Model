@@ -16,7 +16,20 @@ and the 14 *current-week* target columns. A target's own trailing form
 (`passing_yards_tr3`, `_s2d`, ...) is kept — it is a strictly-prior-week
 predictor, not a leak.
 
-Headline stats additionally get p10/p90 quantile bands for the Phase 5 output.
+Loss choice (calibration-correct):
+  * CENTRAL estimate  -> ``loss="squared_error"`` (the conditional MEAN).
+    Stat targets are right-skewed and zero-inflated, so their MEDIAN
+    (``loss="quantile", quantile=0.5`` / ``absolute_error``) sits below the
+    mean and systematically UNDER-projects (measured: RB −40%, TE −33%,
+    WR −30% of mean; TDs collapsed to 0). Because fantasy value is a LINEAR
+    combination of the stats — E[points] = Σ scoreᵢ·E[statᵢ] — the only
+    consistent central estimate is the mean; a median model breaks that
+    linearity (median of a sum ≠ sum of medians) and distorts cross-position
+    (flex) rankings even when per-stat MAE looks fine. Fitting the mean puts
+    per-stat bias at +0…+9% while preserving Spearman (verified 2024-25 test).
+  * BANDS (p10/p90)  -> ``loss="quantile"`` at 0.10 / 0.90, unchanged. Quantile
+    regression is the right tool for the uncertainty band; it is NOT the
+    right tool for the point estimate.
 
 Run:
     uv run python -m src.model            # train, eval, save to models/
@@ -174,17 +187,22 @@ def train_one(pos: str, target: str, feat: pl.DataFrame,
     base_metrics = {"last_game": _m(base["last_game"]),
                     "trailing3": _m(base["trailing3"])}
 
-    # Grid search on validation (q=0.5 median), pick best, evaluate on test.
+    # Grid search on validation (squared_error = conditional MEAN, the
+    # calibration-correct central estimate; see module docstring). Pick best,
+    # evaluate on test.
     best = None
     for params in _grid(quick):
-        m = _fit(HGBR, params, Xtr, ytr, quantile=0.5)
+        m = HGBR(loss="squared_error", random_state=0, **params)
+        m.fit(Xtr, ytr)
         va = np.abs(m.predict(Xva) - yva).mean()
         if best is None or va < best["val_mae"]:
             best = {"val_mae": va, "params": params}
 
-    m = _fit(HGBR, best["params"], Xtr, ytr, quantile=0.5)
+    m = HGBR(loss="squared_error", random_state=0, **best["params"])
+    m.fit(Xtr, ytr)
     pred = m.predict(Xte)
-    test_metrics = {"mae": _mae(pred, yte), "rmse": _rmse(pred, yte)}
+    test_metrics = {"mae": _mae(pred, yte), "rmse": _rmse(pred, yte),
+                    "signed_bias": float(pred.mean() - yte.mean())}
     ranking = _spearman(pred, yte)
     beats = test_metrics["mae"] < min(base_metrics["last_game"]["mae"],
                                       base_metrics["trailing3"]["mae"])

@@ -60,12 +60,23 @@
   orphans). Team `(season,week,team)` is unique in team stats. Join on
   `game_id`, not on `(season,week)` (that fans out across the week's games).
 - **Model (Phase 4):** per (position, target) use
-  `sklearn.ensemble.HistGradientBoostingRegressor(loss="quantile")` — fast
-  (~0.7s/fit), no extra deps. Split train 2016–22 / val 2023 / test 2024–25.
-  All 14 position-stats beat the last-game & trailing-3 baselines on test MAE;
-  Spearman 0.60–0.77 on headline yardage stats. Headline stats get p10/p90 band
-  models (74–89% of actuals inside the 80% band). Saved to `models/models.joblib`
-  + `models/eval_report.json`.
+  `sklearn.ensemble.HistGradientBoostingRegressor` — fast (~0.7s/fit), no extra
+  deps. Split train 2016–22 / val 2023 / test 2024–25.
+  - **Central estimate = conditional MEAN (`loss="squared_error"`); bands =
+    quantile (p10/p90).** The original build fit `loss="quantile", quantile=0.5`
+    (the median) for the point estimate. For right-skewed, zero-inflated stats
+    the median < the mean, so the model systematically UNDER-projected
+    (measured 2024–25: RB −40%, TE −33%, WR −30% of mean; RB/WR/TE TDs = 0 for
+    100% of rows). Fitting the mean fixes this (per-position bias now +0…+3%,
+    better than the last-game/trailing-3 baselines) while preserving Spearman
+    (0.60–0.77) and slightly improving RMSE. This is principled, not a patch:
+    fantasy points are a LINEAR combo of stats, so E[points]=Σ score·E[stat]
+    only holds with the mean; a median model breaks that linearity and distorts
+    cross-position (flex) ranking even when per-stat MAE looks fine.
+  - **Cost:** 4 ultra-sparse count stats (receiving TDs, QB INTs) no longer
+    beat the "last week was 0" null on raw MAE (was 14/14, now 10/14). That's
+    the honest MAE-vs-calibration tradeoff — we optimize the estimate, not MAE.
+  - Saved to `models/models.joblib` + `models/eval_report.json`.
 - **Gotcha:** `df.select([...]).to_numpy()` on a single-column frame returns
   shape (n,1) → broadcast-bugs against (n,) predictions when computing MAE
   (n×n). Use `.to_series().to_numpy()` for y-vectors, or ravel.
@@ -140,29 +151,38 @@
     (under) vs **QB −1.2%** (≈unbiased). Baselines: last_game −0.5 to −2.0,
     trailing3 −0.6 to −2.4 (QB much worse there) — so the model's RB/WR/TE
     under-projection is 3–6× larger than the baselines'.
-  - **Root cause: RB/WR/TE TD predictions are 0.0 for ~100% of rows**
-    (RB/WR/TE actuals: 20%/18%/15% of weeks score a TD). The sparse TD
-    components collapse to 0, removing ~6 pts from every TD, plus the yardage
-    stats are under-projected ~17–36%. (README already flags "conservative TD
-    projections" — this quantifies it.)
-  - **Top-of-board (flex stars) is under-projected too:** top-5% RB actual is
-    **1.6×** predicted, WR **1.36×**, TE **1.34×**; but the top QB is slightly
-    OVER-projected (actual **0.93×** predicted). So the global top tier looks
-    fine (top-decile ratio 1.01) only because the RB/WR/TE under-estimate and
-    the top-QB over-estimate cancel — that cancellation is what makes the
-    aggregate MAE look acceptable.
-  - **Flex distortion:** RB/WR/TE carry a −10.6-pt spread of relative bias,
-    and the model over/under-projects them by up to 40% of their mean. A flex
-    pick between them is systematically biased toward whatever is least
-    under-projected (here WR, −29.6%) and away from RB (−40.1%).
-- **How to fix (not yet done):** the bias is a *calibration* problem, not a
-  ranking one (Spearman is fine). Options: (a) calibrate the per-position PPR
-  output with an isotonic/Platt/quantile mapping fit on val; (b) stop
-  collapsing TDs to 0 — model TD *probability* (binary) separately and add
-  `6 × P(TD)`; (c) per-position bias correction (regress actual on predicted,
-  apply slope/intercept) fit on val. Measure with `src/calibrate.py`: success
-  = per-position rel-bias near 0 AND top-5% flex ratio near 1.0, without
-  sacrificing the (already-good) Spearman.
+  - **Root cause: the point estimate was fit as the MEDIAN**
+    (`loss="quantile", quantile=0.5` ≡ `absolute_error`). For right-skewed,
+    zero-inflated stats the median sits below the mean, so it *must*
+    under-project — the effect scales with zero-inflation (TDs 80–94% zeros →
+    −100%, predicted as 0.0 for ~all rows; RB receiving 41% zeros → −37%;
+    QB passing 7% zeros → ~0%). (README already flagged "conservative TD
+    projections" — this is why.)
+  - **Top-of-board (flex stars) was under-projected too:** top-5% RB actual
+    was **1.6×** predicted, WR **1.36×**, TE **1.34×**; the top QB slightly
+    OVER (0.93×). So the global top tier looked fine (top-decile ratio 1.01)
+    only because the RB/WR/TE under-estimate and the top-QB over-estimate
+    *canceled* — that cancellation is what made the aggregate MAE acceptable.
+  - **Flex distortion:** RB/WR/TE carried a −10.6-pt spread of relative bias,
+    over/under-projected by up to 40% of their mean — a flex pick between them
+    was systematically biased.
+- **FIX (done, this branch):** changed the central-estimate loss from the
+  median to the **conditional mean** (`loss="squared_error"`) in BOTH
+  `src/model.py` and `src.rookie_model.py`; p10/p90 bands stay quantile.
+  This is the principled fix (not an isotonic/Platt afterthought or a hand-
+  fit bias offset): fantasy value is a LINEAR combo of stats, so
+  `E[points] = Σ scoreᵢ·E[statᵢ]` only holds with the mean — a median model
+  breaks that linearity (median of a sum ≠ sum of medians) and distorts
+  cross-position/flex ranking even when per-stat MAE is fine. After the fix:
+  per-position signed bias **QB +2.7% / RB +3.3% / WR +1.5% / TE −1.8%**
+  (all within ±3.3%, better than both naive baselines); TDs no longer collapse
+  to 0 (rookie QBs ~1 TD, TEs ~0.1–0.4); top decile genuinely calibrated
+  (ratio 0.99, not a cancellation); Spearman preserved (0.77→0.769) and RMSE
+  slightly better (6.69→6.16). Honest cost: 4 ultra-sparse count stats
+  (receiving TDs, QB INTs) no longer beat the "last week was 0" null on raw
+  MAE (14/14 → 10/14) — we optimize the calibrated estimate, not MAE.
+  Verify any change with `uv run python -m src.calibrate`: success =
+  per-position rel-bias ≈ 0 AND top-5% flex ratio ≈ 1.0, Spearman preserved.
 
 ## Reproduction
 

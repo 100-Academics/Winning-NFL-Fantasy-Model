@@ -83,10 +83,17 @@ that is a separate, later project.
 - [x] Evaluate on the test split: MAE per stat, and a ranking backtest
   (would ordering players by predicted stat have ranked the actual leaders better
   than a naive baseline?)
-  - **All 14/14 position-stats beat BOTH baselines on MAE.** Ranking (Spearman)
-    is strong on the headline stats: RB rushing 0.77, WR rec 0.76/0.71,
-    TE rec 0.69/0.66, QB passing 0.60. TD/INT counts (sparse, near-zero) have
-    NaN Spearman — expected, low-signal.
+  - **10/14 position-stats beat BOTH baselines on MAE** (was 14/14 when the
+    point estimate was fit as the median; the 4 that don't are the ultra-sparse
+    TD/INT counts where "last week was 0" is a strong null — an honest MAE-vs-
+    calibration tradeoff after switching the central estimate to the mean).
+    Ranking (Spearman) is strong on the headline stats: RB rushing 0.77,
+    WR rec 0.76/0.71, TE rec 0.69/0.66, QB passing 0.60.
+- [x] **Calibration fix (2026-09):** central estimate now fits the conditional
+  MEAN (`squared_error`), not the median — the median under-projected RB/WR/TE
+  by 30–40% of their mean and collapsed TDs to 0 (see NOTES.md "Calibration").
+  Signed bias per position is now within ±3.3%; `src/calibrate.py` +
+  `models/calibration_report.json` verify it.
 - [x] Save trained models to `models/` (joblib) with a version/metadata file
   - `models/models.joblib` (all 14 models + p10/p90 bands + meta) and
     `models/eval_report.json` (per-stat metrics, best params, baselines).
