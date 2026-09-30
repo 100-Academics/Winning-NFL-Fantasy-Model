@@ -125,6 +125,18 @@
       Modest but real — the "beat the consensus" claim holds on signal/quality,
       not on a blowout. (Top-10 weekly rank is noisier than the full-roster
       split in `src/bench.py`.)
+  - **Re-run after the mean-fit fix (2026-09-30, same 2024 w1–12 board):**
+    * Raw components: aggregate MAE **10.81 vs 11.73** (was 10.86) — still
+      better; RMSE **24.1 vs 25.6** (ours now better; was worse).
+    * Weekly 1-PPR points, per position (MAE / RMSE): **QB 9.21/11.7 vs
+      9.73/12.3; RB 6.23/7.8 vs 6.60/8.1; WR 5.81/8.1 vs 6.36/8.3; TE
+      4.74/5.9 vs 5.93/7.2** — we now beat FP on **both** MAE and RMSE at
+      every position (previously FP had the RMSE edge). The old RMSE gap was
+      the median-model under-projection leaking into the squared error;
+      fitting the mean closed it.
+    * Caveat: this is the *same* 2024 test weeks we diagnosed the bias on, so
+      the mean-fit change is validated on in-sample-for-diagnosis data — not a
+      fresh holdout (see the "holdout status" note below).
 - **ESPN** — SWID **does** work, but only against the NEW host
   `lm-api-reads.fantasy.espn.com` with a **league id** (e.g. `.../leagues/899513?view=kona_player_info&scoringPeriodId=W`);
   the old `fantasy.espn.com` host is bot-walled (returns HTML) and needs no
@@ -184,6 +196,71 @@
   Verify any change with `uv run python -m src.calibrate`: success =
   per-position rel-bias ≈ 0 AND top-5% flex ratio ≈ 1.0, Spearman preserved.
 
+## Per-position verification of the mean-fit fix (2026-09-30)
+
+`notebooks/diag_post_mean_fix.py` re-runs the diagnostics on the CURRENT
+(mean-fit) model, broken out **per position and per season** (the pooled
+number can hide season-specific drift), plus band coverage and negative
+predictions. Output → `models/diag_post_mean_fix.json`. Findings:
+
+- **Bias by season (PPR, per position):** no season-specific blowup.
+  - QB +1.4% (2024) / +4.0% (2025); RB +1.8% / +4.8%; WR **−1.4% (2024) /
+    +4.5% (2025)**; TE −0.4% / −3.0%. The WR 2024→2025 sign flip is the one
+    to watch — it's small (≈0.1–0.3 pts) but the only position whose direction
+    changed. TE stays slightly under both years (the one flex position that
+    still reads marginally conservative).
+- **Per-stat (pooled 2024-25):** the residual over-projections concentrate in
+  RB/TE *receiving* (RB rec_yds +9.6%, RB receptions +6.6%, TE receptions
+  −6.2%) and QB passing yards +4.2% — all modest. The TD components are
+  unbiased (within ±6%) and no longer collapse to zero.
+- **Deciles (PPR, per position, all 10):**
+  - **Top decile (flex stars) is well calibrated** at every position —
+    ratios 0.98 (QB) / 1.04 (RB) / 1.02 (WR) / 1.02 (TE). Not a cancellation.
+  - **Bottom decile (waiver/streaming) is OVER-projected:** actual/pred
+    **RB 0.51, WR 0.54** (the model over-estimates low-usage RB/WR by ~2×),
+    TE 0.82, QB 0.99. This is the mean-objective-on-zero-inflated effect the
+    brief predicted — it's real but small in absolute terms (RB bottom-decile
+    actual mean ≈ 1.1 pts, so the over-estimate is ≈ 1.0 pts). For start/sit
+    it means a bottom-board RB/WR is more likely to be *worse* than
+    projected; don't lean on the low end of the band as a floor.
+  - Middle deciles (D3–D6) are essentially flat (residuals within ±0.5).
+- **p10/p90 band coverage (headline stats, per position):** nominal 80%.
+  - **Yards stats are UNDER-covered** — the band is too narrow: QB pass_yds
+    74%, RB rush_yds 86%, TE rec_yds 85% (the rest 85–92%). Under-coverage
+    means "the actual fell outside the band" more often than 20% — the band
+    is **over-confident** on yards. If used for start/sit, treat the yards
+    band as optimistic, especially QB.
+  - **TD/reception stats are OVER-covered** (89–94%) — the band is too wide
+    there (correct for zero-inflated, but wider than nominal).
+  - **The mean sits sensibly inside the band** in 40–52% of the width for
+    most stats (no systematic inversion: `p10>mean` and `p90<mean` are 0%
+    everywhere except QB pass_tds 0.5% / RB rush_tds 16.5% / WR rec_tds
+    47.6% — the last two are the sparse-TD stats where the quantile band
+    degenerates to a near-zero width on most rows; see below).
+  - **Bottom line for risk-based start/sit:** the *central* estimate is
+    well-calibrated per position (good), but the **yards bands are too
+    tight** (under-cover) and the **TD bands are too loose / degenerate** —
+    don't read the band edges as a literal 80% interval for those.
+- **Negative count predictions (clipping):** the squared-error mean objective
+  emits small negatives on ~0.5% of rows for the sparse TD/INT stats
+  (worst: TE rec_tds 12/2510, min −0.13; QB pass_int 6/1328, min −0.30;
+  QB pass_tds 6/1328, min −0.06). Clipping at zero changes stat-MAE by
+  <0.001 — negligible. **Done at the output surface** (`src/predict.py`
+  `_clip_pred`): count stats and band bounds are clipped at 0 in the
+  prediction CLI (and after the rookie-prior blend, which can re-introduce a
+  tiny negative). The stored model is untouched, so `bench`/`calibrate`
+  diagnostics and the band models are unchanged. A Poisson/Tweedie objective
+  is the principled next step if negatives or the loose TD bands become a
+  problem (it keeps the mean property while constraining to ≥ 0), but it's
+  not needed for correctness today.
+- **Holdout status:** the 2024–25 test split is **no longer a clean holdout**
+  — we diagnosed the median-bias on it, so the mean-fit fix is validated on
+  data the model-selection process saw. Treat 2024–25 numbers as
+  *in-sample-for-diagnosis*, not untouched. The genuinely clean holdout is
+  **this season's (2026) live weeks, logged before kickoff.** Score those
+  with `src.predict --compare` as the season progresses and keep that log —
+  that's the only number that tells us the mean-fit change generalizes.
+
 ## Reproduction
 
 - `uv run python -m src.bench` — our model vs naive baselines in PPR space
@@ -191,5 +268,8 @@
 - `uv run python -m src.calibrate` — signed bias per position + projected-vs-
   actual by predicted decile + per-stat bias + flex distortion (same split).
   → `models/calibration_report.json` + `notebooks/charts/calibration_*.png`.
+- `uv run python notebooks/diag_post_mean_fix.py` — per-position, per-season
+  bias + all deciles + p10/p90 band coverage + negative count predictions
+  (the post-mean-fix verification). → `models/diag_post_mean_fix.json`.
 - `uv run python -m src.fetch_fantasypros` then `uv run python -m src.compare_fantasypros`
   — head-to-head vs FantasyPros consensus. → `models/fantasypros_report.json`.

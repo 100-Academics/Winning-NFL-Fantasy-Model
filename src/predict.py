@@ -70,6 +70,22 @@ PHRASE: dict[str, list[tuple[str, str]]] = {
 RANK_STAT = {"QB": "passing_yards", "RB": "rushing_yards",
              "WR": "receiving_yards", "TE": "receiving_yards"}
 
+# Count-valued stats: the squared-error (mean) objective is unbiased but can
+# emit small negative predictions (measured 2024-25 test: up to ~14 rows per
+# stat, all |pred| <= 0.3). Clip those to zero at the OUTPUT surface only —
+# the stored model is untouched, so diagnostics and band models stay the
+# same. Yards stats are NOT in this set (their magnitude makes negatives
+# effectively never fire); only discrete count/TD/INT stats are clipped.
+_COUNT_STATS = {"passing_tds", "rushing_tds", "receiving_tds", "receptions",
+                "passing_interceptions"}
+
+
+def _clip_pred(value: float, target: str) -> float:
+    """Clip count-stat predictions (and band bounds) at zero."""
+    if target in _COUNT_STATS and value < 0.0:
+        return 0.0
+    return value
+
 
 # --------------------------------------------------------------------------- #
 # Loading
@@ -142,11 +158,12 @@ def _predict_row(rec: dict, payload: dict, feat_cols: list[str]) -> dict:
         m = payload["models"].get(key)
         if m is None:
             continue
-        out["preds"][target] = float(m.predict(X)[0])
+        out["preds"][target] = _clip_pred(float(m.predict(X)[0]), target)
         bands = payload.get("bands", {}).get(key)
         if bands and target in HEADLINE.get(pos, set()):
-            out["bands"][target] = (float(bands["p10"].predict(X)[0]),
-                                    float(bands["p90"].predict(X)[0]))
+            lo = _clip_pred(float(bands["p10"].predict(X)[0]), target)
+            hi = _clip_pred(float(bands["p90"].predict(X)[0]), target)
+            out["bands"][target] = (lo, hi)
     return out
 
 
@@ -261,6 +278,13 @@ def _build_prediction(rec: dict, payload: dict, feat_cols: list[str],
                 "prior": {t: round(prior_preds[t], 2) for t in blended},
                 "games_played": games_played,
             }
+
+    # Final guard: count stats must not be negative (the mean objective can
+    # emit small negatives; the rookie blend above can also leave a tiny
+    # negative when the main model went below zero).
+    p["preds"] = {t: _clip_pred(v, t) for t, v in p["preds"].items()}
+    p["bands"] = {t: (_clip_pred(lo, t), _clip_pred(hi, t))
+                  for t, (lo, hi) in p["bands"].items()}
 
     entry = {
         "player": rec["player_display_name"],
