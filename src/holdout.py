@@ -195,7 +195,18 @@ def _build_scheduled_panel(season: int, week: int) -> pl.DataFrame:
         if d.height == 0:
             return d
         keep = [s for s in stats if s in d.columns]
-        return d.select(["season", "week", "player_display_name"] + keep)
+        d = d.select(["season", "week", "player_display_name"] + keep)
+        # The unplayed target week has no NGS row yet, so the (season, week,
+        # player) join in _attach_nextgen nulls out every ngs_* feature (and the
+        # model reads them as 0) — which collapsed elite QB/WR/RB projections on
+        # the live board (e.g. Mahomes 272 -> 44 passing yds). Add a dummy NGS
+        # row at the target week per player (a copy of the player's last-played
+        # NGS values, shifted OUT of the trailing window) so ngs_*_tr3 at the
+        # target week = the mean of the played weeks — exactly what the
+        # played-week path produces. Reuses _add_dummy (NGS has no 'team'
+        # column, so no game-map join is applied).
+        d = _add_dummy(d, "player_display_name", keep)
+        return d
 
     ngs = {
         "passing": _ngs(ngs_p, ["completion_percentage", "avg_time_to_throw",
