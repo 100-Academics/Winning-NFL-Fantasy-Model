@@ -76,7 +76,8 @@ KEY_COLS = [
 # Per-position target stats (the component outcomes we predict). K is excluded
 # (no clean component target in the panel; its value is in a separate project).
 POS_TARGETS: dict[str, list[str]] = {
-    "QB": ["passing_yards", "passing_tds", "passing_interceptions"],
+    "QB": ["passing_yards", "passing_tds", "passing_interceptions",
+           "rushing_yards", "rushing_tds"],
     "RB": ["rushing_yards", "rushing_tds", "receptions",
            "receiving_yards", "receiving_tds"],
     "WR": ["receptions", "receiving_yards", "receiving_tds"],
