@@ -261,6 +261,78 @@ predictions. Output → `models/diag_post_mean_fix.json`. Findings:
   with `src.predict --compare` as the season progresses and keep that log —
   that's the only number that tells us the mean-fit change generalizes.
 
+## Live 2026 holdout — bugs found & fixes (2026-09-30)
+
+Week-4 "live board" looked systematically low (top QB 11.9, RB-heavy, no
+elite stars). Root cause + fix, plus the A/Bs we ran so we don't redo them:
+
+### FIXED — NextGen (NGS) features were null in the upcoming-week path
+The live board is built by `src/holdout._build_scheduled_panel` (weeks not yet
+in `features.parquet`). NGS trailing was built from the NGS file, which only
+has rows through the last *played* week, so the unplayed target week had no NGS
+row to join → every `ngs_*` feature nulled to 0. NGS is the dominant QB/WR
+efficiency signal, so this crushed elite players (Mahomes passing yds 272 → 44;
+the whole board collapsed). **Fix:** in `_ngs()`, add a dummy NGS row at the
+target week per player (reusing `_add_dummy`), so `ngs_*_tr3` = mean of the
+played weeks — exactly what the played-week path produces. Committed `63a7830`.
+Verified: NGS went 454/454-null → populated for every player with NGS data.
+
+### FIXED — QB rushing was not modeled at all
+`POS_TARGETS["QB"]` was passing-only, so Allen/Lamar/Hurts rush TDs never
+counted (Allen's 6 rush TDs in w1-3 = ~47 fantasy pts, unmodeled). **Fix:**
+added `rushing_yards` + `rushing_tds` to `POS_TARGETS["QB"]`, retrained
+(`src/model.py`). QB rushing_yards model **beats baseline** (test MAE 11.22 vs
+13.37, ρ +0.576); QB rushing_tds sits at baseline (rare event — expected).
+Allen → #4, Lamar → #3 in the ESPN-standard board.
+
+### NOT applied — prior-season shrinkage (the "pocket passers too high" fix)
+Hypothesis: QBs rank too high off 3 games of 2026; blend toward prior-season
+per-game rate (w = games/(games+K)). **A/B on the 2025 test holdout,
+early-season rows (games_played_s2d ≤ 4) — it HURTS, not helps:**
+
+| pos | raw ρ | @K=1 | @K=3 | @K=5 |
+|-----|-------|------|------|------|
+| QB  | +0.702| +0.638| +0.551| +0.504|
+| RB  | +0.725| +0.735| +0.712| +0.699|
+| WR  | +0.640| +0.655| +0.634| +0.618|
+| TE  | +0.572| +0.575| +0.538| +0.516|
+
+Why: Shough is QB1 because he is the **top-volume 2026 passer** (44 att/g,
+306 yd/g vs Mahomes 33/271). The model is reading a real usage signal; pulling
+him toward his 2025 *backup* year regresses QBs and only marginally helps
+RB/WR. **Decision: NOT applied.** Repro: `notebooks/_q1_ab.py` (has a K sweep).
+If a user still wants a "veteran prior," this is the mechanism to toggle.
+
+### NOT applied — true opponent-defense features
+Hypothesis: add real defense (yards/sacks/TDs allowed, trailing-3) as features
+to the player models. **A/B on the 2025 test holdout (retrain each
+position×target with the 3 new features): basically the same.** Every delta is
+noise-level — MAE ≤ 0.06, ρ ≤ 0.02. Tally 4 keep / 2 drop / 10 same, and the
+"keeps" (QB passing_yards −0.12 MAE, QB passing_int +0.011 ρ) are offset by the
+"drops" (QB rushing_yards, WR receiving_yards). No position improves
+meaningfully. **Decision: NOT added** — opponent defense is a weak predictor of
+a *specific* player's fantasy output (known). Repro: `notebooks/_def_exp.py`.
+Note: the model *already* has the proxy `total_yards_*_opp` + `rest_*_opp`
+features, so this was a marginal improvement, not a gap.
+
+### Scoring
+The user's league is **ESPN Standard (non-PPR)**: passing 0.04/yd, 4/pass-TD,
+−2/INT; rushing/receiving 0.10/yd, 6/TD; **no point per reception.** The
+model predicts raw components, so scoring is a pure conversion at the output
+surface — keep weights in one place. (The 1-PPR `SCORE` tables in
+`src/bench`/`src/holdout`/`src/calibrate` are for the baseline comparisons, not
+the user's league.)
+
+### Top-defense (D/ST) projection — new, week 4
+`notebooks/_topdef.py`: for each week-4 team, project points-allowed (½ own
+trailing allowed + ½ opponent trailing offense) + turnovers (own trailing D TO
++ opponent projected INTs from the saved QB model), scored on ESPN D/ST tiers
+(+2/TO). Week-4 top 5: SEA, ARI, SF, PIT, NO. **Caveat:** the 2026 season in
+this dataset is high-scoring (many 50–65 pt games), so points-allowed tiers run
+low and turnover volume is the main differentiator — treat absolute D/ST values
+as season-relative. No specific D players projected (per user: defense as a
+whole).
+
 ## Reproduction
 
 - `uv run python -m src.bench` — our model vs naive baselines in PPR space

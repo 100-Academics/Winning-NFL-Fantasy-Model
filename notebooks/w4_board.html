@@ -1,0 +1,317 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<title>Week 4 Board</title>
+<style>
+  :root { color-scheme: dark light; }
+  * { box-sizing: border-box; }
+  body { font: 13px/1.35 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; color: var(--foreground); }
+  .wrap { max-width: 720px; }
+  h1 { font-size: 15px; font-weight: 700; margin: 0 0 2px; }
+  .sub { color: var(--muted-foreground); font-size: 11.5px; margin: 0 0 16px; }
+  .pos { margin-bottom: 18px; }
+  .pos h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .06em;
+            color: var(--muted-foreground); margin: 0 0 6px; display:flex; gap:8px; align-items:baseline; }
+  .pos h2 .n { font-size: 10px; font-weight: 500; opacity:.7; letter-spacing:0; text-transform:none; }
+  .row { display: grid; grid-template-columns: 18px 1fr; gap: 8px; align-items: center; margin: 3px 0; }
+  .rank { text-align:right; color: var(--muted-foreground); font-size: 11px; font-variant-numeric: tabular-nums; }
+  .cell { position: relative; }
+  .bar { height: 24px; border-radius: 5px; background: color-mix(in srgb, var(--accent) 48%, transparent);
+         border: 1px solid color-mix(in srgb, var(--accent) 60%, transparent); min-width: 2px; }
+  .lab { position: absolute; left: 9px; top: 50%; transform: translateY(-50%); display:flex;
+         align-items:center; gap:8px; white-space:nowrap; }
+  .name { font-weight: 600; font-size: 12px; }
+  .team { color: var(--muted-foreground); font-size: 10.5px; font-weight:500; }
+  .pts { position:absolute; right:8px; top:50%; transform:translateY(-50%);
+         font-variant-numeric: tabular-nums; font-weight:700; font-size:12px; }
+  .top .bar { background: color-mix(in srgb, var(--accent) 46%, transparent);
+              border-color: color-mix(in srgb, var(--accent) 55%, transparent); }
+  .note { color: var(--muted-foreground); font-size: 11px; border-top: 1px solid var(--border);
+          padding-top: 10px; margin-top: 4px; }
+  .note b { color: var(--foreground); }
+</style>
+</head>
+<body>
+<div class="wrap" id="app"></div>
+<script>
+const DATA = {
+  "title": "2026 Week 4 \u2014 Top 10 by Position",
+  "scoring": "ESPN Standard (non-PPR)",
+  "positions": {
+    "QB": [
+      {
+        "rank": 1,
+        "name": "Tyler Shough",
+        "team": "NO",
+        "pts": 21.09
+      },
+      {
+        "rank": 2,
+        "name": "Brock Purdy",
+        "team": "SF",
+        "pts": 20.85
+      },
+      {
+        "rank": 3,
+        "name": "Lamar Jackson",
+        "team": "BAL",
+        "pts": 20.79
+      },
+      {
+        "rank": 4,
+        "name": "Josh Allen",
+        "team": "BUF",
+        "pts": 20.64
+      },
+      {
+        "rank": 5,
+        "name": "Jared Goff",
+        "team": "DET",
+        "pts": 20.57
+      },
+      {
+        "rank": 6,
+        "name": "Dak Prescott",
+        "team": "DAL",
+        "pts": 19.42
+      },
+      {
+        "rank": 7,
+        "name": "Patrick Mahomes",
+        "team": "KC",
+        "pts": 19.17
+      },
+      {
+        "rank": 8,
+        "name": "Caleb Williams",
+        "team": "CHI",
+        "pts": 18.87
+      },
+      {
+        "rank": 9,
+        "name": "Joe Burrow",
+        "team": "CIN",
+        "pts": 18.7
+      },
+      {
+        "rank": 10,
+        "name": "Trevor Lawrence",
+        "team": "JAX",
+        "pts": 18.52
+      }
+    ],
+    "RB": [
+      {
+        "rank": 1,
+        "name": "Jahmyr Gibbs",
+        "team": "DET",
+        "pts": 21.87
+      },
+      {
+        "rank": 2,
+        "name": "Bijan Robinson",
+        "team": "ATL",
+        "pts": 18.84
+      },
+      {
+        "rank": 3,
+        "name": "Kenneth Walker III",
+        "team": "KC",
+        "pts": 17.63
+      },
+      {
+        "rank": 4,
+        "name": "James Cook",
+        "team": "BUF",
+        "pts": 15.68
+      },
+      {
+        "rank": 5,
+        "name": "Derrick Henry",
+        "team": "BAL",
+        "pts": 15.07
+      },
+      {
+        "rank": 6,
+        "name": "Ashton Jeanty",
+        "team": "LV",
+        "pts": 14.64
+      },
+      {
+        "rank": 7,
+        "name": "Jonathan Taylor",
+        "team": "IND",
+        "pts": 14.35
+      },
+      {
+        "rank": 8,
+        "name": "Christian McCaffrey",
+        "team": "SF",
+        "pts": 14.27
+      },
+      {
+        "rank": 9,
+        "name": "Chase Brown",
+        "team": "CIN",
+        "pts": 14.23
+      },
+      {
+        "rank": 10,
+        "name": "Aaron Jones",
+        "team": "MIN",
+        "pts": 14.05
+      }
+    ],
+    "WR": [
+      {
+        "rank": 1,
+        "name": "Parker Washington",
+        "team": "JAX",
+        "pts": 12.0
+      },
+      {
+        "rank": 2,
+        "name": "Amon-Ra St. Brown",
+        "team": "DET",
+        "pts": 12.0
+      },
+      {
+        "rank": 3,
+        "name": "Tee Higgins",
+        "team": "CIN",
+        "pts": 11.84
+      },
+      {
+        "rank": 4,
+        "name": "Chris Olave",
+        "team": "NO",
+        "pts": 11.77
+      },
+      {
+        "rank": 5,
+        "name": "Josh Downs",
+        "team": "IND",
+        "pts": 11.58
+      },
+      {
+        "rank": 6,
+        "name": "Alec Pierce",
+        "team": "IND",
+        "pts": 11.48
+      },
+      {
+        "rank": 7,
+        "name": "Ja'Marr Chase",
+        "team": "CIN",
+        "pts": 10.52
+      },
+      {
+        "rank": 8,
+        "name": "CeeDee Lamb",
+        "team": "DAL",
+        "pts": 10.43
+      },
+      {
+        "rank": 9,
+        "name": "Jaxon Smith-Njigba",
+        "team": "SEA",
+        "pts": 10.38
+      },
+      {
+        "rank": 10,
+        "name": "Davante Adams",
+        "team": "LA",
+        "pts": 10.35
+      }
+    ],
+    "TE": [
+      {
+        "rank": 1,
+        "name": "Travis Kelce",
+        "team": "KC",
+        "pts": 10.76
+      },
+      {
+        "rank": 2,
+        "name": "Trey McBride",
+        "team": "ARI",
+        "pts": 9.8
+      },
+      {
+        "rank": 3,
+        "name": "Dalton Kincaid",
+        "team": "BUF",
+        "pts": 9.0
+      },
+      {
+        "rank": 4,
+        "name": "Sam LaPorta",
+        "team": "DET",
+        "pts": 8.78
+      },
+      {
+        "rank": 5,
+        "name": "Brock Bowers",
+        "team": "LV",
+        "pts": 8.48
+      },
+      {
+        "rank": 6,
+        "name": "Mike Gesicki",
+        "team": "CIN",
+        "pts": 8.24
+      },
+      {
+        "rank": 7,
+        "name": "George Kittle",
+        "team": "SF",
+        "pts": 8.22
+      },
+      {
+        "rank": 8,
+        "name": "Dalton Schultz",
+        "team": "HOU",
+        "pts": 8.17
+      },
+      {
+        "rank": 9,
+        "name": "Mark Andrews",
+        "team": "BAL",
+        "pts": 8.12
+      },
+      {
+        "rank": 10,
+        "name": "Juwan Johnson",
+        "team": "NO",
+        "pts": 7.88
+      }
+    ]
+  }
+}
+;
+const POSCOLOR = { QB:"", RB:"", WR:"", TE:"" };
+const maxPts = Math.max(...Object.values(DATA.positions).flat().map(d=>d.pts));
+const app = document.getElementById('app');
+app.innerHTML = `<h1>${DATA.title}</h1><div class="sub">${DATA.scoring} &middot; live model projection</div>` +
+  Object.entries(DATA.positions).map(([pos, rows]) => {
+    const body = rows.map(d => {
+      const w = Math.max(2, (d.pts/maxPts)*100);
+      const top = d.rank<=1 ? ' top' : '';
+      return `<div class="row${top}">
+        <div class="rank">${d.rank}</div>
+        <div class="cell">
+          <div class="bar" style="width:${w}%"></div>
+          <div class="lab"><span class="name">${d.name}</span><span class="team">${d.team}</span></div>
+          <div class="pts">${d.pts.toFixed(1)}</div>
+        </div>
+      </div>`;
+    }).join('');
+    return `<div class="pos"><h2>${pos}<span class="n">top 10</span></h2>${body}</div>`;
+  }).join('') +
+  `<div class="note">Bars scale to the single highest projection (${maxPts.toFixed(1)}) across all positions.
+  QBs lead because ESPN standard still rewards dual-threat passing volume; RB1 Gibbs tops the board at 21.9.
+  <b>Shough is QB1</b> on 2026 volume (44 att/g) — see the Q1 note in chat.</div>`;
+</script>
+</body>
+</html>
