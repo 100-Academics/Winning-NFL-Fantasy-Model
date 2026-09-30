@@ -142,9 +142,9 @@ def get_player_usage(year: int, force: bool = False) -> pl.DataFrame:
 if __name__ == "__main__":
     import argparse
     ap = argparse.ArgumentParser(description="Pull + cache CFBD data (draft picks / college stats).")
-    ap.add_argument("--draft-years", type=int, nargs="+", default=list(range(2016, 2026)))
-    ap.add_argument("--stat-years", type=int, nargs="+", default=list(range(2014, 2025)))
-    ap.add_argument("--usage-years", type=int, nargs="+", default=list(range(2014, 2025)))
+    ap.add_argument("--draft-years", type=int, nargs="+", default=list(range(2016, 2027)))
+    ap.add_argument("--stat-years", type=int, nargs="+", default=list(range(2014, 2026)))
+    ap.add_argument("--usage-years", type=int, nargs="+", default=list(range(2014, 2026)))
     ap.add_argument("--force", action="store_true", help="re-download even if cached")
     args = ap.parse_args()
     for y in args.draft_years:

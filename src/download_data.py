@@ -11,7 +11,7 @@ just re-run the same command and it picks up where it left off.
 
 Usage
 -----
-# Default: core stats + context tables, seasons 2016..2025
+# Default: core stats + context tables, seasons 2016..2026
     uv run python -m src.download_data
 
 # Explicit seasons / a subset of datasets
@@ -41,8 +41,8 @@ import polars as pl
 REPO_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_RAW_DIR = REPO_ROOT / "data" / "raw"
 
-# Default season window (2016-2025 inclusive).
-DEFAULT_SEASONS = list(range(2016, 2026))
+# Default season window (2016-2026 inclusive).
+DEFAULT_SEASONS = list(range(2016, 2027))
 
 
 @dataclass
