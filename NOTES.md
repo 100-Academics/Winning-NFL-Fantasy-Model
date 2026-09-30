@@ -83,3 +83,93 @@
   - **Gotcha:** a `(season, week)` row with no production for the target (e.g. a
     player out that week) is still a valid prediction row — don't treat "player
     not found" as a data error when the week itself has other rows.
+
+## Head-to-head vs the named baselines (FantasyPros / ESPN)
+
+- **FantasyPros public API (free tier)** — the primary "beat" target from
+  NOTES baselines. Auth is the **`x-api-key`** header (NOT `Bearer`; the spec
+  says the gateway hashes the Bearer token and wants `key=value`). Spec at
+  `https://api.fantasypros.com/public/v2/docs/fantasypros_v2_public.yml`.
+  Endpoint: `GET .../public/v2/json/nfl/{season}/projections?position={QB|RB|WR|TE}&week={0..17}`
+  (week=0 = preseason). Free tier = **top-10 per position only**
+  (`limit:10`, `public_api_limited:true`), **rate-limited** (429s are common —
+  back off and retry). `stats` is a **dict** of the SAME raw components our
+  model predicts (`pass_yds`,`pass_tds`,`rec_yds`,`rec_tds`,...) → clean
+  apples-to-apples, no scoring ambiguity. Archived weeks for 2024 & 2025 are
+  available. Key in gitignored `.env` as `FANTASYPROS_API_KEY`.
+  - `src/fetch_fantasypros.py` pulls + caches boards to
+    `data/processed/fantasypros/` (gitignored). `src/compare_fantasypros.py`
+    does the head-to-head (2024 w1–12, n≈120/pos).
+  - **Result (2024 test, vs FP consensus top-10, n≈120/pos, 480 pts-rows):**
+    * Raw stat components (apples-to-apples): aggregate MAE **10.86 vs 11.73 —
+      ours better**; we win MAE on ~10 of 14 stats (all yards stats, both TD
+      yardage, TE receptions). FP wins the sparse count stats (QB pass INT,
+      RB/WR receiving TDs) — those are near-zero events.
+    * Weekly standard-1-PPR points (pooled n=480): MAE **7.13 vs 7.15**
+      (near-tie), RMSE 9.77 vs 9.18 (FP slightly better), but **weekly rank
+      Spearman 0.655 vs 0.601 — ours better** (also better at QB/WR/TE; FP
+      leads the RB weekly rank).
+    * Bottom line: **we beat the FantasyPros consensus on the raw components
+      and on weekly ranking; we're statistically tied on weekly point totals.**
+      Modest but real — the "beat the consensus" claim holds on signal/quality,
+      not on a blowout. (Top-10 weekly rank is noisier than the full-roster
+      split in `src/bench.py`.)
+- **ESPN** — SWID **does** work, but only against the NEW host
+  `lm-api-reads.fantasy.espn.com` with a **league id** (e.g. `.../leagues/899513?view=kona_player_info&scoringPeriodId=W`);
+  the old `fantasy.espn.com` host is bot-walled (returns HTML) and needs no
+  SWID but also none works there. Returns per-league fantasy **points**
+  (not raw components) → less apples-to-apples. SWID in `.env` as `ESPN_SWID`.
+- **Sleeper / Yahoo** — Sleeper's projection board now returns empty for every
+  season/week (endpoint changed); `stats.sleeper.app` doesn't resolve on this
+  box. Yahoo needs an `X-API-Key`. Not currently usable as an archived
+  baseline.
+
+## Calibration / signed-bias (why "MAE looks fine" is not enough)
+
+- **MAE / RMSE / Spearman are all UNSIGNED — they hide systematic over/under-
+  projection, which is exactly what distorts flex decisions.** Even with equal
+  per-position MAE, if the model over-projects one flex position and
+  under-projects another, the cross-position ranking used to fill flex is wrong.
+  Diagnose signed bias, not just MAE. `src/calibrate.py` does this on the SAME
+  2024–25 test split as `bench` (imports `SCORE`/`_ppr` from `src.bench`, so
+  its per-position actual means match `bench_report.json` exactly).
+- **Finding (test 2024–25):** the model UNDER-projects the flex positions
+  heavily and QB is nearly unbiased — i.e. the model is **worse calibrated than
+  both naive baselines**:
+  - per-position signed bias (PPR): **RB −40.1%, TE −32.6%, WR −29.6%**
+    (under) vs **QB −1.2%** (≈unbiased). Baselines: last_game −0.5 to −2.0,
+    trailing3 −0.6 to −2.4 (QB much worse there) — so the model's RB/WR/TE
+    under-projection is 3–6× larger than the baselines'.
+  - **Root cause: RB/WR/TE TD predictions are 0.0 for ~100% of rows**
+    (RB/WR/TE actuals: 20%/18%/15% of weeks score a TD). The sparse TD
+    components collapse to 0, removing ~6 pts from every TD, plus the yardage
+    stats are under-projected ~17–36%. (README already flags "conservative TD
+    projections" — this quantifies it.)
+  - **Top-of-board (flex stars) is under-projected too:** top-5% RB actual is
+    **1.6×** predicted, WR **1.36×**, TE **1.34×**; but the top QB is slightly
+    OVER-projected (actual **0.93×** predicted). So the global top tier looks
+    fine (top-decile ratio 1.01) only because the RB/WR/TE under-estimate and
+    the top-QB over-estimate cancel — that cancellation is what makes the
+    aggregate MAE look acceptable.
+  - **Flex distortion:** RB/WR/TE carry a −10.6-pt spread of relative bias,
+    and the model over/under-projects them by up to 40% of their mean. A flex
+    pick between them is systematically biased toward whatever is least
+    under-projected (here WR, −29.6%) and away from RB (−40.1%).
+- **How to fix (not yet done):** the bias is a *calibration* problem, not a
+  ranking one (Spearman is fine). Options: (a) calibrate the per-position PPR
+  output with an isotonic/Platt/quantile mapping fit on val; (b) stop
+  collapsing TDs to 0 — model TD *probability* (binary) separately and add
+  `6 × P(TD)`; (c) per-position bias correction (regress actual on predicted,
+  apply slope/intercept) fit on val. Measure with `src/calibrate.py`: success
+  = per-position rel-bias near 0 AND top-5% flex ratio near 1.0, without
+  sacrificing the (already-good) Spearman.
+
+## Reproduction
+
+- `uv run python -m src.bench` — our model vs naive baselines in PPR space
+  (2024–25 full roster). → `models/bench_report.json`.
+- `uv run python -m src.calibrate` — signed bias per position + projected-vs-
+  actual by predicted decile + per-stat bias + flex distortion (same split).
+  → `models/calibration_report.json` + `notebooks/charts/calibration_*.png`.
+- `uv run python -m src.fetch_fantasypros` then `uv run python -m src.compare_fantasypros`
+  — head-to-head vs FantasyPros consensus. → `models/fantasypros_report.json`.
