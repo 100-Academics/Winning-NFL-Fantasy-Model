@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<title>Week 4 D/ST Board</title>
+<style>
+  * { box-sizing: border-box; }
+  body { font: 13px/1.35 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; color: var(--foreground); }
+  .wrap { }
+  h1 { font-size: 15px; font-weight: 700; margin: 0 0 2px; }
+  .sub { color: var(--muted-foreground); font-size: 11.5px; margin: 0 0 16px; }
+  .row { display: grid; grid-template-columns: 18px 1fr; gap: 8px; align-items: center; margin: 3px 0; }
+  .rank { text-align:right; color: var(--muted-foreground); font-size: 11px; font-variant-numeric: tabular-nums; }
+  .cell { position: relative; }
+  .bar { height: 24px; border-radius: 5px; background: color-mix(in srgb, var(--accent) 40%, transparent);
+         border: 1px solid color-mix(in srgb, var(--accent) 55%, transparent); min-width: 2px; }
+  .lab { position: absolute; left: 9px; top: 50%; transform: translateY(-50%); display:flex;
+         align-items:center; gap:8px; white-space:nowrap; }
+  .name { font-weight: 600; font-size: 12px; }
+  .opp { color: var(--muted-foreground); font-size: 10.5px; font-weight:500; }
+  .pts { position:absolute; right:8px; top:50%; transform:translateY(-50%);
+         font-variant-numeric: tabular-nums; font-weight:700; font-size:12px; }
+  .top .bar { background: color-mix(in srgb, var(--accent) 48%, transparent);
+              border-color: color-mix(in srgb, var(--accent) 62%, transparent); }
+  .top .name { }
+  .pill { font-size:9px; font-weight:700; letter-spacing:.04em; padding:1px 5px; border-radius:4px;
+          background: color-mix(in srgb, var(--accent) 22%, transparent); color: var(--accent); }
+  .note { color: var(--muted-foreground); font-size: 11px; border-top: 1px solid var(--border);
+          padding-top: 10px; margin-top: 14px; }
+  .note b { color: var(--foreground); }
+</style>
+</head>
+<body>
+<div class="wrap" id="app"></div>
+<script>
+const DATA = [
+  {team:"MIN",opp:"MIA",pa:14.0,a:4,dst:8.4},{team:"BAL",opp:"TEN",pa:16.0,a:4,dst:8.4},
+  {team:"SEA",opp:"LAC",pa:17.8,a:1,dst:5.4},{team:"PIT",opp:"CLE",pa:18.0,a:1,dst:5.4},
+  {team:"GB",opp:"TB",pa:18.0,a:1,dst:5.4},{team:"CHI",opp:"NYJ",pa:20.0,a:1,dst:5.4},
+  {team:"LA",opp:"PHI",pa:20.2,a:1,dst:5.4},{team:"CLE",opp:"PIT",pa:20.5,a:1,dst:5.4},
+  {team:"BUF",opp:"NE",pa:20.8,a:1,dst:5.4},{team:"ARI",opp:"NYG",pa:21.5,a:1,dst:5.4},
+  {team:"TB",opp:"GB",pa:21.5,a:1,dst:5.4},{team:"KC",opp:"LV",pa:21.5,a:1,dst:5.4},
+  {team:"IND",opp:"WAS",pa:22.0,a:1,dst:5.4},{team:"SF",opp:"DEN",pa:22.2,a:1,dst:5.4},
+  {team:"NO",opp:"ATL",pa:22.8,a:1,dst:5.4},{team:"HOU",opp:"DAL",pa:23.0,a:1,dst:5.4},
+  {team:"NYG",opp:"ARI",pa:23.0,a:1,dst:5.4},{team:"PHI",opp:"LA",pa:23.2,a:0,dst:4.4},
+  {team:"NYJ",opp:"CHI",pa:23.5,a:0,dst:4.4},{team:"DET",opp:"CAR",pa:23.5,a:0,dst:4.4},
+  {team:"CIN",opp:"JAX",pa:24.5,a:0,dst:4.4},{team:"MIA",opp:"MIN",pa:24.5,a:0,dst:4.4},
+  {team:"LAC",opp:"SEA",pa:24.8,a:0,dst:4.4},{team:"DEN",opp:"SF",pa:25.2,a:0,dst:4.4},
+  {team:"WAS",opp:"IND",pa:25.5,a:0,dst:4.4},{team:"DAL",opp:"HOU",pa:25.5,a:0,dst:4.4},
+  {team:"ATL",opp:"NO",pa:25.8,a:0,dst:4.4},{team:"LV",opp:"KC",pa:26.0,a:0,dst:4.4},
+  {team:"JAX",opp:"CIN",pa:27.0,a:0,dst:4.4},{team:"CAR",opp:"DET",pa:27.0,a:0,dst:4.4},
+  {team:"TEN",opp:"BAL",pa:27.5,a:0,dst:4.4},{team:"NE",opp:"BUF",pa:27.8,a:0,dst:4.4}
+];
+const maxDst = Math.max(...DATA.map(d=>d.dst));
+const app = document.getElementById('app');
+const body = DATA.map((d,i) => {
+  const w = Math.max(6, (d.dst/maxDst)*100);
+  const top = i<5 ? ' top' : '';
+  const pill = i<5 ? '<span class="pill">PICK</span>' : '';
+  return `<div class="row${top}">
+    <div class="rank">${i+1}</div>
+    <div class="cell">
+      <div class="bar" style="width:${w}%"></div>
+      <div class="lab"><span class="name">${d.team}</span><span class="opp">vs ${d.opp}</span>${pill}</div>
+      <div class="pts">${d.dst.toFixed(1)}</div>
+    </div>
+  </div>`;
+}).join('');
+app.innerHTML = `<h1>2026 Week 4 &mdash; D/ST Board</h1>
+  <div class="sub">ESPN Standard &middot; ranked by opponent Vegas implied total (lowest = best) &middot; all 32</div>
+  ${body}
+  <div class="note">
+    <b>How it's scored:</b> ESPN Standard D/ST tier on projected points allowed
+    (0&ndash;6:+10 &middot; 7&ndash;13:+7 &middot; 14&ndash;17:+4 &middot; 18&ndash;23:+1 &middot; 24&ndash;30:0 &middot; 31+:&minus;1),
+    plus a flat league-mean expectation of ~2.4 sacks and ~1.0 turnover (near-constants &mdash; they set the
+    absolute value but not the ranking). Within a tier, fewer projected points allowed ranks higher.
+    <br><br>
+    <b>Why MIN/BAL top the board:</b> they face the weakest projected offenses (MIA 14.0, TEN 16.0 implied).
+    HOU, ARI, NO dropped from the old board &mdash; they play top offenses (DAL/NYG/ATL), and the old board
+    had them high on turnover <i>luck</i>. Turnovers and sacks are ~noise; the matchup drives D/ST points.
+    <br><br>
+    <b>A/B (2024+25, clean 2025 holdout):</b> this matchup baseline ranks D/ST at Spearman
+    <b>+0.345</b>; the best own-defense/turnover model tops out at <b>+0.336</b> &mdash; a wash, so the
+    simpler baseline is shipped. (Absolute values are season-relative &mdash; 2026 is running high-scoring.)
+  </div>`;
+</script>
+</body>
+</html>

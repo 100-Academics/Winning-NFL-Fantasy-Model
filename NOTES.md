@@ -323,15 +323,56 @@ surface — keep weights in one place. (The 1-PPR `SCORE` tables in
 `src/bench`/`src/holdout`/`src/calibrate` are for the baseline comparisons, not
 the user's league.)
 
-### Top-defense (D/ST) projection — new, week 4
-`notebooks/_topdef.py`: for each week-4 team, project points-allowed (½ own
-trailing allowed + ½ opponent trailing offense) + turnovers (own trailing D TO
-+ opponent projected INTs from the saved QB model), scored on ESPN D/ST tiers
-(+2/TO). Week-4 top 5: SEA, ARI, SF, PIT, NO. **Caveat:** the 2026 season in
-this dataset is high-scoring (many 50–65 pt games), so points-allowed tiers run
-low and turnover volume is the main differentiator — treat absolute D/ST values
-as season-relative. No specific D players projected (per user: defense as a
-whole).
+### Top-defense (D/ST) projection — REBUILT, week 4 (2026-09-30)
+The first D/ST board (`_topdef.py`, week-4 top 5 SEA/ARI/SF/PIT/NO) was BAD and
+has been replaced. Diagnosis + fix, A/B'd so we don't redo it:
+
+- **The old board was missing sacks, missed D/ST TDs, and over-projected
+  turnovers** (2.1–3.4/game vs ~1.0–1.4 forced league-wide), so it was being
+  carried by turnover *luck*. (Agent diagnosis — confirmed.)
+- **A/B (2024+25 actual D/ST points, n≈570/yr; 2025 is the clean holdout per
+  user):**
+  - **Baseline — rank D/ST by the OPPONENT's Vegas implied team total, LOWEST
+    first — is the best ranker: Spearman +0.349 (2024) / +0.339 (2025).**
+    Opponent implied total is the dominant predictor of points-allowed
+    (corr +0.413 to actual allowed; D/ST pts corr +0.345). Sacks (−0.174) and
+    turnovers (−0.119) are weak, noisy, same-sign-correlated noise.
+  - **My own-defense model (points-allowed + shrunk TO/sacks/DTD) does NOT
+    beat it: a grid of 240 weights tops out at +0.336 Spearman** (vs baseline
+    +0.345; `_def_grid.py`) — i.e. adding own-defense signal is at best a wash,
+    at worst slightly worse. Adding a **prior-season defense-quality prior**
+    also fails (2024 worse at every weight; 2025 a wash, `_def_blend.py`).
+  - **Why the gut ("HOU/BAL/DEN are elite") disagrees with the board:** D/ST
+    fantasy value is the **MATCHUP** (who they play), not the team. In 2025
+    HOU is baseline-rank ~326 (worst) *because it plays top offenses* — the
+    defense is still elite but its fantasy output is low. That's correct, not a
+    bug.
+- **Shipped method (`_topdef.py`):** rank by opponent Vegas implied total
+  (lowest = best); ESPN Standard points-allowed tier on that projected
+  allowed; + flat league-mean sacks (~2.36, +1) and hard-shrunk TO (~1.0, +2)
+  for a realistic absolute value (these are near-constants, ranking-invariant).
+  Tie-break within a tier: fewer projected points allowed = better.
+  **Week-4 top 5: MIN (14.0), BAL (16.0), SEA (17.8), PIT (18.0), GB (18.0)** —
+  all facing the weakest projected offenses. (Old board had HOU/ARI/NO high off
+  turnover luck; they're now mid/bottom.)
+- **Caveat (unchanged):** 2026 in this data is high-scoring, so points-allowed
+  tiers run low — treat absolute D/ST values as season-relative. No specific D
+  players projected (per user: defense as a whole).
+- **Clean D/ST holdout (added 2026-09-30):** the D/ST board is now logged and
+  scored the same disciplined way as the offense holdout, via
+  `src/holdout_def.py` (append-only `models/holdout_log_def.jsonl` +
+  `models/holdout_score_def.json`). Log BEFORE kickoff (deterministic from
+  Vegas lines + flat league means — no model, nothing to leak), score AFTER the
+  games (actuals from `schedules` final score → points allowed + `team_weekly_stats`
+  TO/sacks/D-TD). W4 board already logged 2026-09-30T21:02.
+  - When W4 finishes: `uv run python -m src.holdout_def --season 2026 --week 4 --score`.
+  - Note: single weeks are noisy (W3 board ranked top-5 at actual ranks
+    6/7/20/28/29, gap −1.51) — that's the weekly variance the agent flagged;
+    the method is validated on 2024+25, not one week. Keep a per-week log and
+    judge by the trend across weeks, not a single one.
+- Repro: `_def_ab.py` (model vs baseline), `_def_grid.py` (weight sweep),
+  `_def_blend.py` (prior-season prior), `_def_truth.py` (ground-truth corr).
+  `uv run python notebooks/_topdef.py [season] [week]` for the board.
 
 ## Reproduction
 

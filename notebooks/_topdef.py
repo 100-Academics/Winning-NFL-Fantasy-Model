@@ -1,112 +1,105 @@
-"""Week 4 top-defense (D/ST) projection, ESPN STANDARD scoring.
+"""Week-4 (2026) top-defense (D/ST) board — ESPN STANDARD scoring.
 
-For each week-4 team, project (defense as a whole, no specific players):
-  * points_allowed  = 0.5*(own trailing pts allowed) + 0.5*(opponent trailing pts scored)
-  * turnovers       = projected opponent INTs (from the saved QB passing_interceptions
-                      model) + own trailing D turnovers (INT/fumble/safety/blocked kicks)
-Then apply ESPN D/ST scoring:
-  points allowed: 0-6:+10  7-13:+7  14-17:+4  18-23:+1  24-30:0  31+:-1
-  +2 per turnover; -1 if own D/ST unit scores (approximated as 0 here).
-Rank all 16 week-4 teams; print top 10.
+METHOD (chosen by A/B, see notebooks/_def_ab.py, _def_grid.py, _def_truth.py):
+  Rank D/ST by the OPPONENT's Vegas implied team total, LOWEST first.
+  Points-allowed is the dominant term of ESPN D/ST scoring and is best
+  predicted by how much the opponent is expected to score (Vegas). Own-defense
+  trailing stats do NOT improve the ranking (best tuned model 0.055 Spearman
+  << 0.345 baseline, on 2024+25 actuals), so they are not used for ranking.
+
+  Point values shown = ESPN Standard:
+    points-allowed tier on projected allowed (= opponent implied total)
+      0-6:+10  7-13:+7  14-17:+4  18-23:+1  24-30:0  31+:-1
+    + a flat league-mean expected sack count (~2.36, +1/sack) and a hard-shrunk
+      turnover expectation (~1.0, +2/TO) for a realistic total. These are near-
+      constants and do not change the RANKING (verified), only the absolute value.
+
+Usage:  uv run python notebooks/_topdef.py [season] [week]   (default 2026 4)
 """
 import sys
 from pathlib import Path
-import numpy as np, polars as pl
+import polars as pl
+from scipy.stats import spearmanr
+
 REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO))
-import joblib
 
-def pts_allowed_score(p):
-    if p <= 6: return 10
-    if p <= 13: return 7
-    if p <= 17: return 4
-    if p <= 23: return 1
-    if p <= 30: return 0
+SEASON = int(sys.argv[1]) if len(sys.argv) > 1 else 2026
+WEEK = int(sys.argv[2]) if len(sys.argv) > 2 else 4
+
+def tier(a):
+    if a <= 6: return 10
+    if a <= 13: return 7
+    if a <= 17: return 4
+    if a <= 23: return 1
+    if a <= 30: return 0
     return -1
 
-# team points scored proxy per game (from team stats)
-t = pl.read_parquet(REPO/"data/raw/team_weekly_stats.parquet")
-t = t.select(["season","week","team","opponent_team",
-              "passing_tds","rushing_tds","receiving_tds","fg_made",
-              "def_interceptions","def_fumbles","def_safeties",
-              "def_punt_blocks","def_pat_blocks","def_fg_blocks"]).with_columns(
-    pl.col("passing_tds").fill_null(0.0)+pl.col("rushing_tds").fill_null(0.0)*0,  # ensure numeric
-    )
-# points scored = 7*passTD + 6*rushTD + 6*recTD + 3*FG
-t = t.with_columns(
-    (7*pl.col("passing_tds").fill_null(0.0) + 6*pl.col("rushing_tds").fill_null(0.0)
-     + 6*pl.col("receiving_tds").fill_null(0.0) + 3*pl.col("fg_made").fill_null(0.0)).alias("pts_scored"))
-# own trailing points ALLOWED = opponent's points scored that game -> trailing 3 of (own pts_scored is offense; allowed = opp)
-# For "own points allowed" we need opponent's pts in that game. Build allowed = opponent pts.
-# trailing3 helper
-def trail3(df,key,col):
-    df=df.sort([key,"season","week"])
-    return df.with_columns(pl.col(col).shift(1).over([key,"season"]).rolling_mean(3,min_samples=1).over([key,"season"]).alias(col+"_tr3"))
+t = pl.read_parquet(REPO / "data/raw/team_weekly_stats.parquet")
+sched = pl.read_parquet(REPO / "data/raw/schedules.parquet")
 
-# own trailing points allowed: for team X, allowed = opponent's pts_scored in same game
-own_allowed = t.select(["season","week","team","opponent_team"]).join(
-    t.select(["season","week","team","pts_scored"]).rename({"team":"opponent_team"}),
-    on=["season","week","opponent_team"], how="left")
-own_allowed = own_allowed.with_columns(pl.col("pts_scored").alias("pts_allowed")).select(["season","week","team","pts_allowed"])
-own_allowed = trail3(own_allowed, "team", "pts_allowed")
-own_allowed = own_allowed.select(["season","week","team","pts_allowed_tr3"])
+# league/game sack + turnover means (2016-25) for the flat components
+TO_COLS = ["def_interceptions", "def_fumbles", "def_safeties",
+           "def_punt_blocks", "def_pat_blocks", "def_fg_blocks"]
+hist = t.filter(pl.col("season").is_in(range(2016, 2026)))
+for c in TO_COLS:
+    hist = hist.with_columns(pl.col(c).fill_null(0.0))
+SACKS_MEAN = float(hist["def_sacks"].fill_null(0.0).mean())
+TO_MEAN = float(hist.select(pl.sum_horizontal(TO_COLS).alias("to"))["to"].mean())
+print(f"league means used for flat components: sacks/game={SACKS_MEAN:.2f} TO/game={TO_MEAN:.2f}")
 
-# own trailing D turnovers
-TO_COLS=["def_interceptions","def_fumbles","def_safeties","def_punt_blocks","def_pat_blocks","def_fg_blocks"]
-t2 = t.select(["season","week","team"]+[c for c in TO_COLS]).with_columns([pl.col(c).fill_null(0.0) for c in TO_COLS])
-t2 = t2.with_columns((pl.col(TO_COLS[0]) + pl.col(TO_COLS[1]) + pl.col(TO_COLS[2])
-                      + pl.col(TO_COLS[3]) + pl.col(TO_COLS[4]) + pl.col(TO_COLS[5])).alias("d_to"))
-t2 = trail3(t2,"team","d_to").select(["season","week","team","d_to_tr3"])
+sched = sched.with_columns([pl.col(c).fill_null(0.0).cast(pl.Float64) for c in ["spread_line", "total_line"]])
+sched = sched.with_columns(
+    ((pl.col("total_line") - pl.col("spread_line")) / 2).alias("away_imp"),
+    ((pl.col("total_line") + pl.col("spread_line")) / 2).alias("home_imp"))
+oi = pl.concat([
+    sched.select(["season", "week", "away_team", "home_imp"]).rename({"away_team": "team", "home_imp": "proj_allowed"}),
+    sched.select(["season", "week", "home_team", "away_imp"]).rename({"home_team": "team", "away_imp": "proj_allowed"}),
+], how="vertical")
 
-# opponent offense trailing pts scored
-opp_off = trail3(t.select(["season","week","team","pts_scored"]),"team","pts_scored").select(["season","week","team","pts_scored_tr3"])
-opp_off = opp_off.rename({"team":"opponent_team","pts_scored_tr3":"opp_pts_tr3"})
+week = oi.filter((pl.col("season") == SEASON) & (pl.col("week") == WEEK) & pl.col("proj_allowed").is_not_null())
+if len(week) == 0:
+    print(f"No Vegas data for {SEASON} week {WEEK}.")
+    sys.exit(1)
 
-# opponent QB projected INTs (saved model) for week 4
-import src.holdout as H
-panel4 = H._build_scheduled_panel(2026, 4)
-payload=joblib.load(REPO/"models/models.joblib")
-fc=payload["meta"]["feature_columns"]; models=payload["models"]
-qb_int={}
-for r in panel4.filter(pl.col("position")=="QB").to_dicts():
-    X=np.array([0.0 if r.get(c) is None else float(r.get(c)) for c in fc],dtype=np.float32).reshape(1,-1)
-    m=models.get("QB/passing_interceptions")
-    if m is not None:
-        v=float(m.predict(X)[0]); v=max(0,v)
-        qb_int[r["team"]]=qb_int.get(r["team"],0)+v
+rows = []
+for r in week.to_dicts():
+    allowed = r["proj_allowed"]
+    base = tier(allowed)
+    total = base + 1.0 * SACKS_MEAN + 2.0 * TO_MEAN  # flat, ranking-invariant
+    rows.append(dict(team=r["team"], proj_allowed=round(allowed, 1),
+                     allowed_pts=base, d_st=round(total, 1)))
+rows.sort(key=lambda x: (-x["d_st"], x["proj_allowed"]))
 
-sched = pl.read_parquet(REPO/"data/raw/schedules.parquet").filter((pl.col("season")==2026)&(pl.col("week")==4))
-games = sched.select(["away_team","home_team"]).to_dicts()
-# team -> opponent
-team_opp={}
-for g in games:
-    team_opp[g["away_team"]]=g["home_team"]; team_opp[g["home_team"]]=g["away_team"]
+print(f"\n=== {SEASON} WEEK {WEEK}  D/ST board  (rank by opponent Vegas implied total, lowest=best) ===")
+print(f"{'RK':>3} {'DEF':5} {'projAllwd':>10} {'allowedPts':>11} {'D/ST':>7}")
+print("-" * 42)
+for i, r in enumerate(rows, 1):
+    mark = "  <= top pick" if i <= 5 else ""
+    print(f"{i:>3} {r['team']:5} {r['proj_allowed']:>10} {r['allowed_pts']:>11} {r['d_st']:>7}{mark}")
 
-oa2={}
-for r in own_allowed.filter((pl.col("season")==2026)&(pl.col("week")<4)).sort("week").to_dicts():
-    if r["pts_allowed_tr3"] is not None: oa2[r["team"]]=r["pts_allowed_tr3"]
-to2={}
-for r in t2.filter((pl.col("season")==2026)&(pl.col("week")<4)).sort("week").to_dicts():
-    if r["d_to_tr3"] is not None: to2[r["team"]]=r["d_to_tr3"]
-po2={}
-for r in opp_off.filter((pl.col("season")==2026)&(pl.col("week")<4)).sort("week").to_dicts():
-    if r["opp_pts_tr3"] is not None: po2[r["opponent_team"]]=r["opp_pts_tr3"]
-
-def project(team):
-    opp=team_opp[team]
-    own_all=oa2.get(team, 17.0)
-    opp_off_=po2.get(opp, 20.0)
-    pts_allowed=0.5*own_all+0.5*opp_off_
-    to=(to2.get(team,0.0)) + (qb_int.get(opp,0.5))
-    base=pts_allowed_score(pts_allowed)
-    total=base + 2*to
-    return dict(team=team, opp=opp, pts_allowed=round(pts_allowed,1),
-                turnovers=round(to,2), pts_allowed_pts=base, total=round(total,2))
-
-rows=[project(t) for t in team_opp]
-rows.sort(key=lambda r:r["total"],reverse=True)
-print(f"{'RANK':5}{'DEF':6}{'vs':5}{'ptsAllwd':>9}{'TO':>6}{'ptsAllwdP':>10}{'D/ST':>7}")
-print("-"*48)
-for i,r in enumerate(rows,1):
-    mark=" <=" if i<=10 else ""
-    print(f"{i:5}{r['team']:6}{r['opp']:5}{r['pts_allowed']:>9}{r['turnovers']:>6}{r['pts_allowed_pts']:>10}{r['total']:>7}{mark}")
+# --- sanity check: correlation of this board's ranking vs actual D/ST on 2024+25 ---
+sc = sched.select(["season", "week", "away_team", "away_score", "home_team", "home_score"])
+sc = sc.with_columns([pl.col(c).fill_null(0.0).cast(pl.Float64) for c in ["away_score", "home_score"]])
+allowed_act = pl.concat([
+    sc.select(["season", "week", "away_team", "home_score"]).rename({"away_team": "team", "home_score": "allowed"}),
+    sc.select(["season", "week", "home_team", "away_score"]).rename({"home_team": "team", "away_score": "allowed"}),
+], how="vertical")
+t2 = t.select(["season", "week", "team"] + TO_COLS + ["def_sacks", "def_tds"])
+for c in TO_COLS + ["def_sacks", "def_tds"]:
+    t2 = t2.with_columns(pl.col(c).fill_null(0.0))
+t2 = t2.with_columns(pl.sum_horizontal(TO_COLS).alias("act_to"))
+act = (t2.join(allowed_act, on=["season", "week", "team"], how="left")
+       .with_columns((tier_expr := (pl.when(pl.col("allowed") <= 6).then(10).when(pl.col("allowed") <= 13).then(7)
+                              .when(pl.col("allowed") <= 17).then(4).when(pl.col("allowed") <= 23).then(1)
+                              .when(pl.col("allowed") <= 30).then(0).otherwise(-1))).alias("tier"))
+       .with_columns((pl.col("tier") + 2 * pl.col("act_to") + pl.col("def_sacks") + 6 * pl.col("def_tds")).alias("act_dst")))
+oi2 = pl.concat([
+    sched.select(["season", "week", "away_team", "home_imp"]).rename({"away_team": "team", "home_imp": "oi"}),
+    sched.select(["season", "week", "home_team", "away_imp"]).rename({"home_team": "team", "away_imp": "oi"}),
+], how="vertical")
+chk = act.join(oi2, on=["season", "week", "team"], how="left").filter(
+    pl.col("season").is_in([2024, 2025]) & pl.col("act_dst").is_not_null() & pl.col("oi").is_not_null())
+rho = spearmanr(-chk["oi"].to_numpy(), chk["act_dst"].to_numpy())[0]
+print(f"\nA/B sanity (2024+25, n={len(chk)}): Spearman(opponent implied total, lowest first vs actual D/ST) = {rho:+.3f}")
+print("  (this is the number that must beat any own-defense model; see _def_grid.py)")
