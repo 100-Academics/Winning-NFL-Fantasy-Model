@@ -9,7 +9,12 @@ compare it against two naive baselines:
 The model must BEAT these on the test set or it adds noise, not signal.
 
 Split (chronological, never random):
-    train 2016-2022   |   val 2023   |   test 2024-2025
+    train 2016-2023   |   val 2024   |   test 2025
+(val = most recent full season before test, and disjoint from train so the
+ hyperparameter search is selected on genuinely unseen data; 2026 is the live
+ pre-kickoff holdout via src.holdout.)
+Optional recency weighting: ``--decay 0.9`` weights training rows by
+``0.9**(most_recent - season)`` so recent seasons dominate; 1.0 = unweighted.
 
 Feature rule (leak-free): use every feature column EXCEPT the identifier keys
 and the 14 *current-week* target columns. A target's own trailing form
@@ -54,9 +59,13 @@ MODELS_DIR = REPO_ROOT / "models"
 # --------------------------------------------------------------------------- #
 # Splits & targets
 # --------------------------------------------------------------------------- #
-TRAIN_SEASONS = list(range(2016, 2023))   # 2016..2022
-VAL_SEASONS   = [2023]
-TEST_SEASONS  = [2024, 2025]
+# 2024 was the test season for a long time and we over-diagnosed on it (median
+# bias, band tuning, ...), so it is now FOLDED INTO TRAINING and 2025 is the
+# sole held-out test season. 2026 is the LIVE holdout (logged pre-kickoff by
+# src.holdout), so nothing from 2025+ is ever used to fit the model.
+TRAIN_SEASONS = list(range(2016, 2024))   # 2016..2023
+VAL_SEASONS   = [2024]                    # most recent full season before test
+TEST_SEASONS  = [2025]
 
 # Identifier / key columns — never used as model features.
 KEY_COLS = [
@@ -100,6 +109,28 @@ def _xy(sub: pl.DataFrame, feat_cols: list[str], target: str) -> tuple[np.ndarra
     X = sub.select(feat_cols).fill_null(0.0).to_numpy().astype(np.float32)
     y = sub.select(target).to_series().to_numpy().astype(np.float64)
     return X, y
+
+
+def _season_series(sub: pl.DataFrame) -> np.ndarray:
+    return sub.select("season").to_series().to_numpy()
+
+
+def _season_weights(sub: pl.DataFrame, decay: float) -> np.ndarray | None:
+    """Per-row recency weight (1.0 for the most recent season, decay^age older).
+
+    ``age`` = most_recent_training_season - row_season, in years. ``decay`` in
+    (0,1): e.g. 0.9 makes a 2-year-old season count 0.81x as much. Returns None
+    for decay <= 1 (unweighted). Used only for TRAINING rows — validation/test
+    stay unweighted so model selection and scoring are not distorted.
+    """
+    if decay is None or decay >= 1.0:
+        return None
+    seasons = _season_series(sub)
+    recent = float(np.nanmax(seasons)) if seasons.size else 0.0
+    age = recent - seasons
+    w = np.power(decay, age).astype(np.float64)
+    # keep weights on a [0.01, 1.0] scale so HGBR's internal weighting stays sane
+    return np.clip(w, 0.01, 1.0)
 
 
 def _split(feat: pl.DataFrame, pos: str) -> dict[str, pl.DataFrame]:
@@ -166,18 +197,19 @@ def _grid(quick: bool) -> list[dict]:
     ]
 
 
-def _fit(HGBR_cls, params: dict, X, y, quantile=0.5):
+def _fit(HGBR_cls, params: dict, X, y, quantile=0.5, w=None):
     m = HGBR_cls(loss="quantile", quantile=quantile, random_state=0, **params)
-    m.fit(X, y)
+    m.fit(X, y, sample_weight=w)
     return m
 
 
 def train_one(pos: str, target: str, feat: pl.DataFrame,
-              feat_cols: list[str], quick: bool) -> dict:
+              feat_cols: list[str], quick: bool, decay: float = 1.0) -> dict:
     splits = _split(feat, pos)
     Xtr, ytr = _xy(splits["train"], feat_cols, target)
     Xva, yva = _xy(splits["val"], feat_cols, target)
     Xte, yte = _xy(splits["test"], feat_cols, target)
+    wtr = _season_weights(splits["train"], decay)   # None when decay >= 1
     base = _baselines(splits["test"], target)
 
     # Baseline test metrics (fill NaN baselines with 0 = "no prior game")
@@ -193,13 +225,13 @@ def train_one(pos: str, target: str, feat: pl.DataFrame,
     best = None
     for params in _grid(quick):
         m = HGBR(loss="squared_error", random_state=0, **params)
-        m.fit(Xtr, ytr)
+        m.fit(Xtr, ytr, sample_weight=wtr)
         va = np.abs(m.predict(Xva) - yva).mean()
         if best is None or va < best["val_mae"]:
             best = {"val_mae": va, "params": params}
 
     m = HGBR(loss="squared_error", random_state=0, **best["params"])
-    m.fit(Xtr, ytr)
+    m.fit(Xtr, ytr, sample_weight=wtr)
     pred = m.predict(Xte)
     test_metrics = {"mae": _mae(pred, yte), "rmse": _rmse(pred, yte),
                     "signed_bias": float(pred.mean() - yte.mean())}
@@ -210,6 +242,7 @@ def train_one(pos: str, target: str, feat: pl.DataFrame,
     record = {
         "position": pos, "target": target,
         "n_train": len(ytr), "n_val": len(yva), "n_test": len(yte),
+        "season_weight_decay": decay,
         "best_params": best["params"], "val_mae": best["val_mae"],
         "test": test_metrics, "baseline_test": base_metrics,
         "test_spearman": ranking, "beats_baseline": bool(beats),
@@ -218,13 +251,13 @@ def train_one(pos: str, target: str, feat: pl.DataFrame,
 
     # Headline stats: p10 / p90 bands (refit best params at each quantile).
     if target in HEADLINE.get(pos, set()):
-        lo = _fit(HGBR, best["params"], Xtr, ytr, quantile=0.10).predict(Xte)
-        hi = _fit(HGBR, best["params"], Xtr, ytr, quantile=0.90).predict(Xte)
+        lo = _fit(HGBR, best["params"], Xtr, ytr, quantile=0.10, w=wtr).predict(Xte)
+        hi = _fit(HGBR, best["params"], Xtr, ytr, quantile=0.90, w=wtr).predict(Xte)
         record["test_p10"] = float(lo.mean())
         record["test_p90"] = float(hi.mean())
         record["band_models"] = {
-            "p10": _fit(HGBR, best["params"], Xtr, ytr, quantile=0.10),
-            "p90": _fit(HGBR, best["params"], Xtr, ytr, quantile=0.90),
+            "p10": _fit(HGBR, best["params"], Xtr, ytr, quantile=0.10, w=wtr),
+            "p90": _fit(HGBR, best["params"], Xtr, ytr, quantile=0.90, w=wtr),
         }
     return record
 
@@ -232,20 +265,21 @@ def train_one(pos: str, target: str, feat: pl.DataFrame,
 # --------------------------------------------------------------------------- #
 # Orchestration
 # --------------------------------------------------------------------------- #
-def run(quick: bool = False) -> dict:
+def run(quick: bool = False, decay: float = 1.0, models_name: str | None = None) -> dict:
     MODELS_DIR.mkdir(parents=True, exist_ok=True)
     feat = load_features()
     feat_cols = feature_columns(feat)
     print(f"features: {feat.height:,} rows, {len(feat_cols)} model features")
     print(f"positions/targets: "
           + ", ".join(f"{p}({len(t)})" for p, t in POS_TARGETS.items()))
-    print(f"split: train {TRAIN_SEASONS} | val {VAL_SEASONS} | test {TEST_SEASONS}\n")
+    wtag = f" | season-weight decay={decay}" if decay < 1.0 else ""
+    print(f"split: train {TRAIN_SEASONS} | val {VAL_SEASONS} | test {TEST_SEASONS}{wtag}\n")
 
     results: dict[str, dict] = {}
     n_beats = n_models = 0
     for pos, targets in POS_TARGETS.items():
         for target in targets:
-            rec = train_one(pos, target, feat, feat_cols, quick)
+            rec = train_one(pos, target, feat, feat_cols, quick, decay=decay)
             results[f"{pos}/{target}"] = rec
             n_models += 1
             n_beats += int(rec["beats_baseline"])
@@ -262,13 +296,15 @@ def run(quick: bool = False) -> dict:
     report = {
         "generated": _dt.datetime.now().isoformat(timespec="seconds"),
         "quick": quick,
+        "season_weight_decay": decay,
         "split": {"train": TRAIN_SEASONS, "val": VAL_SEASONS, "test": TEST_SEASONS},
         "n_features": len(feat_cols),
         "n_models": n_models,
         "n_beat_baseline": n_beats,
         "results": {k: _clean(v) for k, v in results.items()},
     }
-    report_path = MODELS_DIR / "eval_report.json"
+    report_path = MODELS_DIR / ("eval_report.json" if models_name is None
+                                else f"eval_report_{models_name}.json")
     report_path.write_text(json.dumps(report, indent=2, default=str))
 
     # Save the trained models (joblib) + the report.
@@ -277,6 +313,7 @@ def run(quick: bool = False) -> dict:
         "meta": {
             "generated": report["generated"],
             "split": report["split"],
+            "season_weight_decay": decay,
             "n_features": len(feat_cols),
             "feature_columns": feat_cols,
             "pos_targets": POS_TARGETS,
@@ -284,7 +321,7 @@ def run(quick: bool = False) -> dict:
         "models": {k: v["model"] for k, v in results.items()},
         "bands": {k: v["band_models"] for k, v in results.items() if "band_models" in v},
     }
-    models_path = MODELS_DIR / "models.joblib"
+    models_path = MODELS_DIR / (models_name or "models.joblib")
     joblib.dump(models_payload, models_path)
 
     print(f"\n{'='*64}")
@@ -299,8 +336,15 @@ def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--quick", action="store_true",
                     help="smaller grid / fewer iters (fast smoke test)")
+    ap.add_argument("--decay", type=float, default=1.0,
+                    help="recency weight for training rows: decay^years-from-most-"
+                         "recent (e.g. 0.9 = 2yr-old season counts 0.81x). "
+                         "1.0 (default) = unweighted. Test/val stay unweighted.")
+    ap.add_argument("--out-name", default=None,
+                    help="suffix for models.joblib + eval_report.json (so an "
+                         "A/B run doesn't clobber the default model).")
     args = ap.parse_args(argv)
-    run(quick=args.quick)
+    run(quick=args.quick, decay=args.decay, models_name=args.out_name)
     return 0
 
 
