@@ -35,8 +35,8 @@ REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
 RAW_DIR = REPO_ROOT / "data" / "raw"
 PROCESSED_DIR = REPO_ROOT / "data" / "processed"
 
-COLLEGE_YEARS = list(range(2014, 2025))   # a 2016 rookie's senior yr was 2015
-DRAFT_YEARS = list(range(2016, 2026))
+COLLEGE_YEARS = list(range(2014, 2026))   # a 2016 rookie's senior yr was 2015
+DRAFT_YEARS = list(range(2016, 2027))
 COMBINE_COLS = ["forty", "vertical", "broad_jump", "cone", "shuttle", "bench"]
 
 # (category, stat_type) -> feature name, for the college stats we keep.
