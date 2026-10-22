@@ -374,6 +374,71 @@ has been replaced. Diagnosis + fix, A/B'd so we don't redo it:
   `_def_blend.py` (prior-season prior), `_def_truth.py` (ground-truth corr).
   `uv run python notebooks/_topdef.py [season] [week]` for the board.
 
+## Live 2026 holdout — W4 scored, W5 logged (2026-10-08)
+- **Week 4 (scored 2026-10-08, both tracks clean — logged pre-kickoff 09-30,
+  scored against pulled actuals):**
+  - **Offense (n=338):** model **Spearman +0.786**, MAE 4.87 — beats trailing-3
+    (+0.753, MAE 4.99) and last-game (+0.684, MAE 5.95) on ranking; lowest MAE
+    of the three. **Trend w1→w4: +0.682 → +0.759 → +0.786 → +0.786** (peaked,
+    holding — the mean-fit model is generalizing live, not just in-sample).
+  - **D/ST (n=32):** Spearman **+0.378**; top-5 (by board) MIN/SEA/BAL/GB/PIT
+    landed actual ranks **3/6/7/13/20**, top-5 mean 7.80 vs rest 5.11 (**gap
+    +2.69**). A strong week — big jump from W3 (gap −1.51, ranks 6/7/20/28/29).
+    The matchup baseline (rank by opponent's Vegas implied total) is paying off.
+  - Score files: `models/holdout_score.json` (+`2026_w04`), `models/holdout_score_def.json`
+    (+`2026_w04`).
+- **Week 5 (logged pre-kickoff 2026-10-08T16:05 — the clean act; games this
+  weekend Oct 10–12):** offense **442 players**, D/ST **30 teams** (2 byes that
+  week). W5 boards in `notebooks/w5_board.html` + `models/w5_board.json`
+  (offense top-10/pos in ESPN standard, full 30-team D/ST). Score after the
+  games: `uv run python -m src.holdout --season 2026 --week 5 --score` and
+  `uv run python -m src.holdout_def --season 2026 --week 5 --score`.
+- **REFRESH PITFALL (the one that would have cost us the model):** the model
+  is trained on **2016–2026**, but `src.predict --refresh` hard-codes
+  `--seasons 2025 2026 --force` and `download_data` writes each dataset to ONE
+  fixed filename — so a `--refresh` would have **overwritten the raw parquets
+  with only 2025+2026, deleting 2016–2024 (the training history)**. To refresh
+  for an upcoming week, pull the FULL range first:
+  `uv run python -m src.download_data --seasons 2016 2017 2018 2019 2020 2021 2022 2023 2024 2025 2026 --datasets core,context,advanced --force`,
+  then `uv run python -m src.features`. (Do NOT run `predict --refresh` while
+  the model depends on 2016–2024.)
+- **`participation.parquet` refresh fails** on 2026 (`load_participation`:
+  "Season must be between 2016 and 2025") — expected; it's not used by
+  `features`/`holdout`/`predict`, and it fails before write so the prior file
+  stays intact. Ignore that one `[FAIL]`.
+
+## Live 2026 holdout — W5 scored, W7 logged (2026-10-22)
+- **Week 5 (logged pre-kickoff 2026-10-08T16:05; games Oct 10–12; scored
+  2026-10-22 after a full-range data refresh):**
+  - **Offense (442 logged, n=320 scored):** model **Spearman +0.727**, MAE 5.43 —
+    beats trailing-3 (+0.698, MAE 5.49) and last-game (+0.644, MAE 6.30) on
+    ranking AND has the lowest MAE — 5 straight weeks ahead of both baselines.
+    **Trend w1→w5: +0.682 → +0.759 → +0.786 → +0.786 → +0.727** (cooled from the
+    w3–w4 plateau but still clearly ahead; single-week noise, no action).
+  - **D/ST (n=30):** Spearman **+0.168** (noisy vs w4 +0.378 — expected weekly
+    variance); **top-5 gap +3.96 = best of the season so far** (w3 −1.51,
+    w4 +2.69, w5 +3.96). Board top-5 HOU/JAX/CIN/NYJ/WAS landed actual ranks
+    **2/3/11/13/22**, top-5 mean actual 9.00 vs rest 5.04. HOU (3 pts allowed,
+    4 sacks → 16.0) and NYJ (15.0, 8 sacks) carried it; WAS (allowed 27, rank
+    22) was the miss. Method unchanged — judged on the gap trend.
+  - Score files: `models/holdout_score.json` (+`2026_w05`),
+    `models/holdout_score_def.json` (+`2026_w05`).
+- **Week 6: SKIPPED** — no board was logged (offense or D/ST) and no W6 board
+  exists, so W6 is not in the holdout record. Per user: evaluate the prior
+  completed week (W5) instead.
+- **Week 7 (logged pre-kickoff 2026-10-22T16:39 — the clean act; games Oct
+  22–25):** offense **446 players**, D/ST **28 teams** (2 byes). W7 boards in
+  `notebooks/w7_board.html` + `models/w7_board.json` (offense top-10/pos in
+  ESPN standard, full 28-team D/ST). **W7 D/ST top-5: HOU (vs NYG, 16.0 imp),
+  MIN (17.5), NYJ (17.5), CLE (18.0), TEN (19.5)**; sits: NYG (26.5 imp),
+  GB (28.2 imp, vs DET). Score after the games:
+  `uv run python -m src.holdout --season 2026 --week 7 --score` and
+  `uv run python -m src.holdout_def --season 2026 --week 7 --score`.
+- Data refresh for this cycle: full range 2016–2026 re-pulled (core/context/
+  advanced, `--force`) + `src.features` rebuild → `features.parquet` 64,104
+  rows (2026 now w1–w6 actuals). Only the expected `participation` [FAIL]
+  (2026 unsupported by nflreadpy).
+
 ## Reproduction
 
 - `uv run python -m src.bench` — our model vs naive baselines in PPR space
