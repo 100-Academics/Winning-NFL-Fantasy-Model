@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<title>Week 4 FP Consensus</title>
+<style>
+  * { box-sizing: border-box; }
+  body { font: 13px/1.35 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; color: var(--foreground); }
+  h1 { font-size: 15px; font-weight: 700; margin: 0 0 2px; }
+  .sub { color: var(--muted-foreground); font-size: 11.5px; margin: 0 0 16px; }
+  .pos { margin-bottom: 18px; }
+  .pos h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .06em;
+            color: var(--muted-foreground); margin: 0 0 6px; display:flex; gap:8px; align-items:baseline; }
+  .pos h2 .n { font-size: 10px; font-weight: 500; opacity:.7; letter-spacing:0; text-transform:none; }
+  .row { display: grid; grid-template-columns: 18px 1fr; gap: 8px; align-items: center; margin: 3px 0; }
+  .rank { text-align:right; color: var(--muted-foreground); font-size: 11px; font-variant-numeric: tabular-nums; }
+  .cell { position: relative; }
+  .bar { height: 24px; border-radius: 5px; background: color-mix(in srgb, var(--accent) 40%, transparent);
+         border: 1px solid color-mix(in srgb, var(--accent) 55%, transparent); min-width: 2px; }
+  .lab { position: absolute; left: 9px; top: 50%; transform: translateY(-50%); display:flex;
+         align-items:center; gap:8px; white-space:nowrap; }
+  .name { font-weight: 600; font-size: 12px; }
+  .team { color: var(--muted-foreground); font-size: 10.5px; font-weight:500; }
+  .pts { position:absolute; right:8px; top:50%; transform:translateY(-50%);
+         font-variant-numeric: tabular-nums; font-weight:700; font-size:12px; }
+  .top .bar { background: color-mix(in srgb, var(--accent) 48%, transparent);
+              border-color: color-mix(in srgb, var(--accent) 62%, transparent); }
+  .note { color: var(--muted-foreground); font-size: 11px; border-top: 1px solid var(--border);
+          padding-top: 10px; margin-top: 14px; }
+  .note b { color: var(--foreground); }
+</style>
+</head>
+<body>
+<div class="wrap" id="app"></div>
+<script>
+const DATA = {
+  "QB": [
+    {name:"Josh Allen",team:"BUF",pts:22.65},{name:"Lamar Jackson",team:"BAL",pts:21.33},
+    {name:"Patrick Mahomes II",team:"KC",pts:19.67},{name:"Trevor Lawrence",team:"JAC",pts:19.43},
+    {name:"Tyler Shough",team:"NO",pts:19.27},{name:"Joe Burrow",team:"CIN",pts:19.2},
+    {name:"Brock Purdy",team:"SF",pts:18.98},{name:"Kyler Murray",team:"MIN",pts:18.77},
+    {name:"Bryce Young",team:"CAR",pts:18.72},{name:"C.J. Stroud",team:"HOU",pts:18.22}],
+  "RB": [
+    {name:"Jahmyr Gibbs",team:"DET",pts:20.39},{name:"Jonathan Taylor",team:"IND",pts:18.41},
+    {name:"Derrick Henry",team:"BAL",pts:17.68},{name:"Bijan Robinson",team:"ATL",pts:17.56},
+    {name:"Kenneth Walker III",team:"KC",pts:15.24},{name:"Christian McCaffrey",team:"SF",pts:14.83},
+    {name:"James Cook III",team:"BUF",pts:14.71},{name:"Jaylen Warren",team:"PIT",pts:13.73},
+    {name:"Chuba Hubbard",team:"CAR",pts:12.99},{name:"Jeremiyah Love",team:"ARI",pts:12.98}],
+  "WR": [
+    {name:"Jaxon Smith-Njigba",team:"SEA",pts:15.31},{name:"Ja'Marr Chase",team:"CIN",pts:12.68},
+    {name:"Amon-Ra St. Brown",team:"DET",pts:12.43},{name:"Chris Olave",team:"NO",pts:12.3},
+    {name:"Zay Flowers",team:"BAL",pts:11.8},{name:"Puka Nacua",team:"LAR",pts:11.47},
+    {name:"Nico Collins",team:"HOU",pts:11.07},{name:"Drake London",team:"ATL",pts:11.0},
+    {name:"CeeDee Lamb",team:"DAL",pts:10.91},{name:"Justin Jefferson",team:"MIN",pts:10.78}],
+  "TE": [
+    {name:"Trey McBride",team:"ARI",pts:10.05},{name:"Brock Bowers",team:"LV",pts:9.53},
+    {name:"George Kittle",team:"SF",pts:8.59},{name:"Tyler Warren",team:"IND",pts:7.84},
+    {name:"Dalton Kincaid",team:"BUF",pts:7.51},{name:"Travis Kelce",team:"KC",pts:7.4},
+    {name:"Isaiah Likely",team:"NYG",pts:7.15},{name:"Sam LaPorta",team:"DET",pts:6.91},
+    {name:"Juwan Johnson",team:"NO",pts:6.88},{name:"Harold Fannin Jr.",team:"CLE",pts:6.7}]
+};
+const maxPts = Math.max(...Object.values(DATA).flat().map(d=>d.pts));
+const app = document.getElementById('app');
+app.innerHTML = `<h1>2026 Week 4 &mdash; FantasyPros Consensus</h1>
+  <div class="sub">Standard (non-PPR) &middot; top-10 per position (free tier) &middot; 79 experts</div>` +
+  Object.entries(DATA).map(([pos, rows]) => {
+    const body = rows.map((d,i) => {
+      const w = Math.max(2, (d.pts/maxPts)*100);
+      const top = i===0 ? ' top' : '';
+      return `<div class="row${top}">
+        <div class="rank">${i+1}</div>
+        <div class="cell">
+          <div class="bar" style="width:${w}%"></div>
+          <div class="lab"><span class="name">${d.name}</span><span class="team">${d.team}</span></div>
+          <div class="pts">${d.pts.toFixed(2)}</div>
+        </div>
+      </div>`;
+    }).join('');
+    return `<div class="pos"><h2>${pos}<span class="n">top 10</span></h2>${body}</div>`;
+  }).join('') +
+  `<div class="note">
+    <b>Pulled today, pre-kickoff.</b> FantasyPros public consensus (free tier = top-10/position only).
+    Both our board and this one are <b>standard non-PPR</b>, so the points are directly comparable.
+    <br><br>
+    <b>Top-10 overlap vs our model (W4):</b> QB 7/10 &middot; RB 7/10 &middot; WR 5/10 &middot; TE 8/10.
+    Closest agreement at RB/TE; biggest split at WR (FP has Smith-Njigba #1, we have St. Brown/Washington up top)
+    and at the top QB (FP: Allen #1; we: Shough #1 on 2026 volume). The rest of the QB board is nearly identical.
+  </div>`;
+</script>
+</body>
+</html>
