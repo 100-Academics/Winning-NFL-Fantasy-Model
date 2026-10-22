@@ -224,20 +224,98 @@ def _attach_nextgen(panel: pl.DataFrame, ngs: dict[str, pl.DataFrame]) -> pl.Dat
 
 
 # --------------------------------------------------------------------------- #
+# Usage shares + prior-season bridge (2026-10-22 A/B winners)
+# --------------------------------------------------------------------------- #
+USAGE_COLS = ["target_share", "air_yards_share", "wopr", "racr"]
+PREV_SEASON_STATS = ["targets", "carries", "attempts", "receptions",
+                     "receiving_yards", "passing_yards"]
+
+
+def load_usage(raw_dir: pathlib.Path = RAW_DIR) -> pl.DataFrame:
+    """Per-game usage/efficiency shares from the raw player table (REG only)."""
+    return (pl.read_parquet(raw_dir / "player_weekly_stats.parquet")
+            .filter(pl.col("season_type") == "REG")
+            .select(["season", "week", "player_id", *USAGE_COLS])
+            .sort(["player_id", "season", "week"])
+            .unique(subset=["season", "week", "player_id"]))
+
+
+def _usage_trailing(usage: pl.DataFrame) -> pl.DataFrame:
+    out = usage
+    for c in USAGE_COLS:
+        out = out.with_columns([
+            _trailing(["player_id"], c, 3).alias(f"{c}_tr3"),
+            _s2d_rate(["player_id"], c).alias(f"{c}_s2d"),
+        ])
+    return out.select(
+        ["season", "week", "player_id"] +
+        [f"{c}_{w}" for c in USAGE_COLS for w in ("tr3", "s2d")]
+    )
+
+
+def _attach_usage_shares(feat: pl.DataFrame,
+                         usage: pl.DataFrame | None) -> pl.DataFrame:
+    """Trailing usage/efficiency shares (target share, air yards, WoPR, RaCR).
+
+    2026-10-22 A/B (notebooks/_exp_feedback_ab.py, V2/V6 vs V0 on the clean
+    2025 holdout): adding these lifted pooled Spearman 0.496 -> 0.513,
+    early-season rho 0.498 -> 0.534, and beat-baseline 9/16 -> 12/16. Trailing
+    box totals alone cannot separate a real usage role from a low-snap
+    efficiency fluke (the Week-4 Parker Washington over-projection is this
+    failure mode); the shares can. Strictly trailing: shift(1) within
+    (player_id), week-sorted, so the current week's outcome never leaks in.
+    """
+    if usage is None or not usage.height:
+        cols = [f"{c}_{w}" for c in USAGE_COLS for w in ("tr3", "s2d")]
+        return feat.with_columns([pl.lit(None, dtype=pl.Float64).alias(c)
+                                  for c in cols])
+    return feat.join(_usage_trailing(usage),
+                     on=["season", "week", "player_id"], how="left")
+
+
+def _prev_season_bridge(feat: pl.DataFrame, panel: pl.DataFrame) -> pl.DataFrame:
+    """Prior-season per-game stats: the veteran bridge into Week 1-3.
+
+    Every within-season rolling window partitions by (player_id, season) and
+    starts null (read as 0), so a veteran enters Week 1 with zero form
+    features while rookies get the rookie prior. A player's season-S stats are
+    tagged as the PRIOR-season features for season S+1 and joined in — strictly
+    the previous season, so no leakage. 2026-10-22 A/B (V3/V6): pooled rho
+    0.496 -> 0.506 alone; combined with the usage shares (V6) it is the best
+    arm: pooled 0.513, early-season 0.534. Trees learn how fast prior-season
+    usage should decay into the current season (role changes included).
+    """
+    p = panel.select(["player_id", "season", "week", *PREV_SEASON_STATS])
+    per_season = (p.group_by(["player_id", "season"])
+                  .agg([pl.col(s).mean().alias(f"prev_season_{s}_pg")
+                        for s in PREV_SEASON_STATS]
+                       + [pl.len().alias("prev_season_games")]))
+    per_season = per_season.select(
+        ["player_id", (pl.col("season") + 1).cast(pl.Int32).alias("season")])
+    return feat.join(per_season, on=["player_id", "season"], how="left")
+
+
+# --------------------------------------------------------------------------- #
 # Top-level
 # --------------------------------------------------------------------------- #
 def build_features_from(panel: pl.DataFrame, team: pl.DataFrame,
-                        ngs: dict[str, pl.DataFrame]) -> pl.DataFrame:
+                        ngs: dict[str, pl.DataFrame],
+                        usage: pl.DataFrame | None = None) -> pl.DataFrame:
     """Build leakage-safe features from pre-loaded inputs.
 
     Split out from :func:`build_features` so tests can perturb ``panel`` and
-    rebuild without re-reading every raw file.
+    rebuild without re-reading every raw file. ``usage`` is the REG
+    player_weekly_stats usage-share table (see :func:`load_usage`); the live
+    scheduled-panel path passes a dummy-row-augmented copy. If omitted, the
+    usage-share columns are all null (read as 0 by the models).
     """
     # Keep the scoring positions we model (QB/RB/WR/TE/K).
     feat = panel.filter(pl.col("position").is_in(sorted(RELEVANT_POSITIONS)))
     feat = _player_features(feat)
     feat = _attach_team_and_opp(feat, team)
     feat = _attach_nextgen(feat, ngs)
+    feat = _attach_usage_shares(feat, usage)
+    feat = _prev_season_bridge(feat, panel)
     return feat
 
 
@@ -245,7 +323,8 @@ def build_features(raw_dir: pathlib.Path = RAW_DIR) -> pl.DataFrame:
     panel = build_panel(raw_dir)
     team = load_team_stats(raw_dir)
     ngs = load_nextgen(raw_dir)
-    return build_features_from(panel, team, ngs)
+    usage = load_usage(raw_dir)
+    return build_features_from(panel, team, ngs, usage)
 
 
 def main() -> None:

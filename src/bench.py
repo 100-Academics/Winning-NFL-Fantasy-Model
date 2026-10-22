@@ -16,12 +16,12 @@ that "beats the baselines" in this space is one that ranks/estimates weekly
 PPR better than "last week" or "3-week average" — which is exactly what the
 public projection boards compete on.
 
-Standard 1-PPR scoring (the most common league default):
-  yards (rush/pass/rec)   1 pt / 10 yds
-  TD (rush/pass/rec)       6 pts each
-  receptions               1 pt each
-  interception            -2 pts
-  fumble lost             -2 pts
+ESPN Standard scoring (the user's league; weights live in src.scoring):
+  passing yards   0.04 pts / yd
+  passing TD      4 pts,  interception -2 pts
+  rushing yards   0.10 pts / yd,  rushing TD 6 pts
+  receiving yards 0.10 pts / yd,  receiving TD 6 pts
+  (no point per reception)
 
 Run:  uv run python -m src.bench
 """
@@ -37,22 +37,15 @@ from scipy.stats import rankdata
 
 from src.clean import PROCESSED_DIR
 from src.model import POS_TARGETS
+from src.scoring import SCORING_LABEL, ESPN_STANDARD as SCORE
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
 MODELS_DIR = REPO_ROOT / "models"
 TEST_SEASONS = [2024, 2025]
 
-# Standard 1-PPR point values.
-SCORE = {
-    "passing_yards": 0.1, "rushing_yards": 0.1, "receiving_yards": 0.1,
-    "passing_tds": 6.0, "rushing_tds": 6.0, "receiving_tds": 6.0,
-    "receptions": 1.0,
-    "passing_interceptions": -2.0,
-}
-
 
 def _ppr(vals: dict[str, float]) -> float:
-    """Convert a dict of stat components -> standard PPR points."""
+    """Convert a dict of stat components -> ESPN Standard points."""
     return sum(SCORE.get(s, 0.0) * (v or 0.0) for s, v in vals.items())
 
 
@@ -130,7 +123,7 @@ def run() -> dict:
             per_pos.setdefault(pos, {}).setdefault(name, []).append(val)
 
     # Summarize.
-    out = {"scoring": "standard 1-PPR",
+    out = {"scoring": SCORING_LABEL,
            "test_seasons": TEST_SEASONS,
            "positions": {}, "aggregate": {}}
     for pos in POS_TARGETS:

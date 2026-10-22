@@ -49,14 +49,9 @@ import joblib
 import numpy as np
 import polars as pl
 
-# Standard 1-PPR scoring — identical to src.bench (self-contained so this
-# diagnostic doesn't depend on the bench module being present).
-SCORE = {
-    "passing_yards": 0.1, "rushing_yards": 0.1, "receiving_yards": 0.1,
-    "passing_tds": 6.0, "rushing_tds": 6.0, "receiving_tds": 6.0,
-    "receptions": 1.0,
-    "passing_interceptions": -2.0,
-}
+# ESPN Standard scoring — imported from src.scoring (single source of truth;
+# was a self-contained 1-PPR copy here until 2026-10-22).
+from src.scoring import SCORING_LABEL, ESPN_STANDARD as SCORE
 from src.clean import PROCESSED_DIR
 from src.model import POS_TARGETS, MODELS_DIR
 
@@ -211,7 +206,7 @@ def build_report() -> dict:
 
     report: dict = {
         "generated": _dt.datetime.now().isoformat(timespec="seconds"),
-        "scoring": "standard 1-PPR (imported from src.bench)",
+        "scoring": SCORING_LABEL + " (src.scoring)",
         "test_seasons": TEST_SEASONS,
         "n_deciles": N_DECILES,
         "positions": {},

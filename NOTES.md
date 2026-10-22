@@ -439,6 +439,106 @@ has been replaced. Diagnosis + fix, A/B'd so we don't redo it:
   rows (2026 now w1–w6 actuals). Only the expected `participation` [FAIL]
   (2026 unsupported by nflreadpy).
 
+## Third-party LLM feedback review — claim audit + A/B (2026-10-22)
+
+An external LLM (not involved with this repo) submitted a review listing "bugs" and
+improvements (pasted as-is; implementing every item was explicitly **not** required).
+Every claim was verified against the actual code/data, every testable proposal A/B'd
+against the clean 2025 holdout, and decisions used the standing rule (ship only if it
+beats baseline V0; within ±0.01 Spearman = noise → keep baseline).
+
+### Claim audit (third-party claim → verdict)
+
+1. **"Scoring multiplier bug"** (passing 0.1/yd, 6/TD in the src tables; only the board
+   used 0.04/4) — **partially true.** `src/bench`/`calibrate`/`holdout`/`compare_fantasypros`
+   carried an internally consistent heavy-QB 1-PPR scheme (0.10/pass-yd, 6/pass-TD, +1 PPR),
+   not the ESPN Standard (0.04/4, no PPR) the user's league actually uses — so pooled
+   holdout Spearman measured a different ranking space than the board. **Fixed:** single
+   source of truth in `src/scoring.py` (ESPN Standard), all four modules import it; W1–W5
+   2026 re-scored (log untouched; 1-PPR numbers archived in
+   `models/holdout_score_1ppr_archive.json`). Under ESPN Standard the model still beats
+   both baselines every week (pooled ρ: W2 +0.718, W3 +0.758, W4 +0.762, W5 +0.674) and
+   still beats FantasyPros on MAE+RMSE at every position.
+2. **Double-counted passing yards + opponent join "bug"** in `features.py` — **observation
+   true, fix already rejected.** `team_weekly_stats` has `passing_yards == receiving_yards`
+   exactly, so old `total_yards` double-counted passing, and `*_opp` was the opponent's
+   trailing *offensive* yards (mislabeled "allowed"). But these are strictly trailing
+   features (shift(1)) — no lookahead — and the earlier A/B for true opponent-defense
+   features (yards/sacks/TDs allowed) found no improvement. Re-A/B'd the fully-corrected
+   version (V1): pooled ρ +0.0013, within noise → **not applied**.
+3. **NGS joined on display name, not `player_id`** — **true but negligible:** the gsis
+   join recovers exactly one QB (Cam Ward, "Cameron Ward"); the 883 dropped
+   (season, week, name) rows are pre/postseason weeks (0, 18, 19–22), not name collisions;
+   PJ Walker is a name-variant risk. 2025-holdout impact ≈ 0 (V1) → **not applied** per the
+   A/B rule; one-line correctness fix to bundle into the next retrain if desired.
+4. **`predict.py` lacks scheduled panel / QB rushing / RANK_STAT ranking** — **true for the
+   CLI** (the holdout logging path already had the fallback). **Fixed:** unplayed weeks
+   fall back to `src.holdout._build_scheduled_panel` (no --refresh needed; verified W8,
+   445 players); QB sentences include rushing; `--all` boards rank by projected ESPN
+   Standard points; --refresh documented as destructive and not recommended.
+5. **"Washington/Shough float to the top of W4 for lack of usage features"** — board quote
+   was accurate and current. W4 actuals (ESPN Standard): Washington 12.0→1.0, Downs
+   11.6→1.6, Lamb 10.4→24.3 — the low-snap efficiency error is real. The proposed remedy
+   (usage shares) was A/B'd and **won** (below) → **applied**.
+6. **MAE-based grid selection favors over-regularized trees; use RMSE + early stopping** —
+   A/B'd (V4): pooled ρ +0.005, within noise → **not applied**.
+7. **Poisson loss for count stats** — A/B'd (V5): pooled ρ −0.005 (worse), early-season
+   worse → **rejected**.
+8. **Recalibrate p10/p90 bands (conformal or Poisson)** — A/B'd without retraining
+   (`notebooks/_exp_bands.py`): split-conformal shifts (2024-val signed-residual
+   percentiles) lift QB passing-yards coverage 76.1%→79.7% (nominal 80%), all other bands
+   neutral (86–92%); Poisson TD bands over-cover 95%+ → rejected. **Applied:**
+   `models/band_shifts.json` + `src/predict.py` applies the shifts at the output layer
+   (stored band models untouched, same pattern as zero-clipping).
+9. **Prior-season bridge as INPUT features (not post-hoc blending)** — A/B'd (V3): pooled
+   ρ +0.010 (borderline), early-season +0.022. Combined with usage shares (V6): pooled ρ
+   +0.017, early-season +0.036, 12/16 beat baseline → **applied (V6)**.
+
+### A/B arms (2025 clean holdout; train 2016–23 / val 2024 / test 2025, full 48-config grid)
+
+| arm | change | pooled MAE | pooled ρ | beat-base | early ρ (wk1–4) | verdict |
+| --- | --- | --- | --- | --- | --- | --- |
+| V0 | retrained baseline | 8.074 | 0.4959 | 9/16 | 0.4981 | — |
+| V1 | NGS gsis join + team-yards redefinition + opp allowed yards | 8.032 | 0.4972 | 9/16 | 0.5047 | noise → not applied |
+| V2 | usage shares (target/air-yds/WoPR/RaCR tr3+s2d) | 8.034 | 0.5098 | 12/16 | 0.5267 | **applied** |
+| V3 | prior-season per-game bridge | 8.054 | 0.5057 | 11/16 | 0.5201 | borderline; in combo |
+| V4 | RMSE-based grid selection | 8.083 | 0.5009 | 10/16 | 0.4999 | noise → not applied |
+| V5 | Poisson loss for counts | 8.070 | 0.4912 | 11/16 | 0.4936 | worse → rejected |
+| **V6** | **V2 + V3** | **8.063** | **0.5127** | **12/16** | **0.5344** | **applied (shipped model)** |
+
+V6 per-target: 15/16 Spearman up; biggest gains on receiving targets (RB rec_yds +0.035,
+RB receptions +0.042, TE rec_yds +0.023, TE receptions +0.021); only regression
+QB/passing_yards −0.012 (single-season noise; QB position ρ overall 0.410→0.425, best of
+all arms).
+
+### Shipped changes (A/B-gated or correctness fixes)
+
+- `src/scoring.py` — ESPN Standard single source of truth; bench/calibrate/holdout/compare import it.
+- `src/features.py` — +8 usage-share features + 7 prior-season features (V6); `load_usage()`;
+  the scheduled-panel path passes a dummy-row usage table (`src/holdout.py`).
+- `src/model.py` retrain (2026-10-22) — shipped `models/models.joblib` now carries the V6
+  features (95 model features). **Live-holdout note:** 2026 W1–W7 logs come from the
+  pre-V6 model (frozen, scored as-is); W8 onward logs with the V6 model.
+- `src/predict.py` — scheduled-panel fallback, QB rushing in the sentence, fantasy-point
+  board ranking, conformal band shifts.
+- `models/band_shifts.json` — conformal band calibration applied at the output layer.
+
+### NOT applied (tested, rejected or within noise — do not re-test without a new signal)
+
+- V1 team/yardage redefinition (double-count fix + opp allowed yards): within noise on 2025.
+- V1 NGS gsis join key: within noise on 2025 (recovers 1 QB); correctness-only.
+- V4 RMSE grid selection.
+- V5 Poisson count loss.
+- Poisson TD uncertainty bands (over-cover 95%+).
+- Injury/roster "vacated opportunity" features: NOT A/B'd — `injuries.parquet` is
+  report-level (sparse `report_status` strings), not player-game designations; building a
+  clean vacated-usage feature would need a data pipeline the A/B can't cheaply validate,
+  and the V6 usage shares already capture much of the reallocation signal in-sample.
+
+Repro: `uv run python notebooks/_exp_feedback_ab.py` (V0–V5, ~30 min) + the V6 combo arm
+appended to `models/ab_feedback_report.json`; band experiment:
+`uv run python notebooks/_exp_bands.py`.
+
 ## Reproduction
 
 - `uv run python -m src.bench` — our model vs naive baselines in PPR space

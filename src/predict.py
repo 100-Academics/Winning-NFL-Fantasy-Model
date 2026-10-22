@@ -45,6 +45,7 @@ from src.model import (
     HEADLINE,
 )
 from src.clean import PROCESSED_DIR
+from src.scoring import fantasy_points
 
 REPO_ROOT = PROCESSED_DIR.parent.parent
 
@@ -52,7 +53,9 @@ REPO_ROOT = PROCESSED_DIR.parent.parent
 PHRASE: dict[str, list[tuple[str, str]]] = {
     "QB": [("passing_tds", "passing TDs"),
            ("passing_yards", "passing yards"),
-           ("passing_interceptions", "interceptions")],
+           ("passing_interceptions", "interceptions"),
+           ("rushing_yards", "rushing yards"),
+           ("rushing_tds", "rushing TDs")],
     "RB": [("rushing_yards", "rushing yards"),
            ("rushing_tds", "rushing TDs"),
            ("receptions", "receptions"),
@@ -66,7 +69,9 @@ PHRASE: dict[str, list[tuple[str, str]]] = {
            ("receiving_tds", "receiving TDs")],
 }
 
-# Headline stat used to rank a position's board.
+# Headline stat for the --compare raw-stat error summary. Board RANKING uses
+# projected ESPN Standard fantasy points (src.scoring), NOT this single stat —
+# so Lamar's rushing and CMC's receiving count on the board.
 RANK_STAT = {"QB": "passing_yards", "RB": "rushing_yards",
              "WR": "receiving_yards", "TE": "receiving_yards"}
 
@@ -146,7 +151,8 @@ def _games_played_before(feat: pl.DataFrame, season: int, week: int) -> pl.DataF
 # --------------------------------------------------------------------------- #
 # Prediction
 # --------------------------------------------------------------------------- #
-def _predict_row(rec: dict, payload: dict, feat_cols: list[str]) -> dict:
+def _predict_row(rec: dict, payload: dict, feat_cols: list[str],
+                 band_shifts: dict | None = None) -> dict:
     """Predict all targets for a single (player, season, week) record (dict)."""
     pos = rec["position"]
     X = np.array([rec.get(c) for c in feat_cols], dtype=object)
@@ -163,7 +169,15 @@ def _predict_row(rec: dict, payload: dict, feat_cols: list[str]) -> dict:
         if bands and target in HEADLINE.get(pos, set()):
             lo = _clip_pred(float(bands["p10"].predict(X)[0]), target)
             hi = _clip_pred(float(bands["p90"].predict(X)[0]), target)
-            out["bands"][target] = (lo, hi)
+            # Split-conformal calibration (2026-10-22): shift the band edges by
+            # the 2024-val signed-residual percentiles so the p10-p90 band
+            # covers ~80% on the clean 2025 holdout (QB pass_yds 76.1->79.7%;
+            # all others neutral). Stored band models untouched — output
+            # surface only, like the zero-clipping above.
+            sh = (band_shifts or {}).get(key)
+            if sh:
+                lo, hi = lo + sh["shift_lo"], hi + sh["shift_hi"]
+            out["bands"][target] = (_clip_pred(lo, target), _clip_pred(hi, target))
     return out
 
 
@@ -213,8 +227,8 @@ def _select_rows(feat: pl.DataFrame, season: int, week: int,
 
 
 def _head_stat(entry: dict) -> float:
-    stat = RANK_STAT.get(entry["position"], "passing_yards")
-    return float(entry["preds"].get(stat, 0.0))
+    """Projected ESPN Standard fantasy points — the board ranking key."""
+    return fantasy_points(entry["preds"])
 
 
 def _head_error_stats(entries: list[dict]) -> dict:
@@ -254,8 +268,9 @@ def _prior_predict(rec: dict, prior: dict, pos: str) -> dict[str, float] | None:
 
 def _build_prediction(rec: dict, payload: dict, feat_cols: list[str],
                       compare: bool, prior: dict | None = None,
-                      games_played: int = 0, is_rookie: bool = False) -> dict:
-    p = _predict_row(rec, payload, feat_cols)
+                      games_played: int = 0, is_rookie: bool = False,
+                      band_shifts: dict | None = None) -> dict:
+    p = _predict_row(rec, payload, feat_cols, band_shifts=band_shifts)
     main_preds = dict(p["preds"])
 
     # Phase 5.5 shrinkage: for a rookie in their first season, blend the main
@@ -380,9 +395,38 @@ def run(argv: list[str] | None = None) -> int:
                         args.players if args.players else None,
                         args.all, args.top)
 
+    # Split-conformal band shifts (output-surface only; see _predict_row).
+    band_shifts: dict = {}
+    sh_path = MODELS_DIR / "band_shifts.json"
+    if sh_path.exists():
+        band_shifts = json.loads(sh_path.read_text(encoding="utf-8"))
+
+    # Upcoming (unplayed) week: fall back to the SAME leakage-safe scheduled
+    # panel the holdout log uses (src.holdout._build_scheduled_panel). No
+    # --refresh needed — and --refresh must NOT be used to fetch an upcoming
+    # week, because download_data overwrites the raw parquets with only the
+    # last two seasons (deleting the 2016-2024 training history).
+    if rows.height == 0:
+        from src.holdout import _build_scheduled_panel
+        sched = _build_scheduled_panel(args.season, args.week)
+        if sched.height:
+            if args.players:
+                like = [p.lower() for p in args.players]
+                mask = (pl.col("player_display_name").str.to_lowercase()
+                        .str.contains(like[0], literal=True))
+                for p in like[1:]:
+                    mask = mask | (pl.col("player_display_name").str.to_lowercase()
+                                   .str.contains(p, literal=True))
+                sched = sched.filter(mask)
+            rows = sched
+            print(f"[predict] (season={args.season}, week={args.week}) not in "
+                  f"features.parquet — built scheduled panel "
+                  f"({rows.height} players) from roster + schedule.", file=sys.stderr)
+
     if rows.height == 0:
         msg = (f"no (season={args.season}, week={args.week}) rows in the features "
-               f"file. If this is an upcoming week, re-run with --refresh.")
+               f"file and no scheduled panel could be built "
+               f"(need that week's schedule + this season's roster).")
         if args.players:
             msg += f" (also: none of {args.players} matched)"
         print(msg, file=sys.stderr)
@@ -392,9 +436,13 @@ def run(argv: list[str] | None = None) -> int:
     for r in rows.iter_rows(named=True):
         is_rookie = (prior is not None
                      and rookie_map.get(r["player_id"]) == args.season)
-        gp = games_by_player.get(r["player_id"], 0)
+        gp = games_by_player.get(r["player_id"])
+        if gp is None:
+            # scheduled (upcoming) week: the row carries games_played_s2d
+            gp = int(float(r.get("games_played_s2d") or 0))
         entry = _build_prediction(r, payload, feat_cols, args.compare,
-                                  prior=prior, games_played=gp, is_rookie=is_rookie)
+                                  prior=prior, games_played=gp, is_rookie=is_rookie,
+                                  band_shifts=band_shifts)
         entry["sentence"] = _phrase(entry["position"], entry["preds"], entry["bands"])
         entries.append(entry)
 
@@ -433,6 +481,7 @@ def run(argv: list[str] | None = None) -> int:
         venue = f"{e['team']} {'vs' if e['home'] else '@'} {e['opponent']}"
         tag = "  [ROOKIE — rookie-prior blend]" if e.get("rookie") else ""
         print(f"\n{e['player']} ({e['position']}, {venue}) — Week {e['week']}, {e['season']}{tag}")
+        print(f"  ≈ {fantasy_points(e['preds']):.1f} fantasy pts (ESPN Standard)")
         print(f"  {e['sentence']}")
         if e.get("rookie_blend") is not None:
             rb = e["rookie_blend"]

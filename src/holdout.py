@@ -70,12 +70,11 @@ from src import features as F
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8")
 
-# Standard 1-PPR (identical to src.bench / src.calibrate).
-SCORE = {
-    "passing_yards": 0.1, "rushing_yards": 0.1, "receiving_yards": 0.1,
-    "passing_tds": 6.0, "rushing_tds": 6.0, "receiving_tds": 6.0,
-    "receptions": 1.0, "passing_interceptions": -2.0,
-}
+# ESPN Standard (non-PPR) scoring — the user's league (src.scoring, single
+# source of truth). Was a "standard 1-PPR" table (0.10/yard passing, 6/pass-TD,
+# +1 PPR) until 2026-10-22; those scores are archived in
+# models/holdout_score_1ppr_archive.json.
+from src.scoring import SCORING_LABEL, ESPN_STANDARD as SCORE
 
 COUNT_STATS = {"passing_tds", "rushing_tds", "receiving_tds", "receptions",
                "passing_interceptions"}
@@ -222,8 +221,20 @@ def _build_scheduled_panel(season: int, week: int) -> pl.DataFrame:
     #     build_features_from, which adds them — same order as the real pipeline)
     panel = attach_schedule_context(panel, sched.filter(pl.col("season") == season))
 
-    # --- run through the SAME feature pipeline (adds trailing team/opp/NGS)
-    feat = F.build_features_from(panel, teams, ngs)
+    # --- usage shares: played weeks + dummy target row (same leakage logic as
+    #     the NGS dummy: the dummy's own values are shifted OUT of the trailing
+    #     window, so tr3/s2d at the target week = mean of the played weeks)
+    usage = (pw.filter((pl.col("season") == season)
+                       & (pl.col("week") < week)
+                       & (pl.col("position").is_in(pos4))
+                       & (pl.col("season_type") == "REG"))
+             .select(["season", "week", "player_id", *F.USAGE_COLS])
+             .sort(["player_id", "season", "week"])
+             .unique(subset=["season", "week", "player_id"]))
+    usage = _add_dummy(usage, "player_id", F.USAGE_COLS)
+
+    # --- run through the SAME feature pipeline (adds trailing team/opp/NGS/usage)
+    feat = F.build_features_from(panel, teams, ngs, usage)
 
     # --- keep only the target-week rows
     out = feat.filter(pl.col("week") == week)
@@ -408,7 +419,7 @@ def score_week(season: int, week: int) -> dict:
         n_scored += 1
 
     out = {
-        "season": season, "week": week, "scoring": "standard 1-PPR",
+        "season": season, "week": week, "scoring": SCORING_LABEL,
         "n_logged": len(entries), "n_scored": n_scored,
         "logged_at": e.get("logged_at"),
         "note": ("clean holdout: prediction logged pre-kickoff (or replayed "
@@ -442,7 +453,7 @@ def score_week(season: int, week: int) -> dict:
 def _print_score(out: dict) -> None:
     print("=" * 72)
     print(f"HOLDOUT SCORE  {out['season']} w{out['week']}  "
-          f"(PPR; model vs baselines, n={out.get('n_scored',0)})")
+          f"({SCORING_LABEL}; model vs baselines, n={out.get('n_scored',0)})")
     print(f"logged_at: {out.get('logged_at')}")
     print("=" * 72)
     hdr = f"{'POS':<4}{'n':>6}{'actμ':>9}   {'MODEL':>22}{'LAST':>22}{'TR3':>22}"

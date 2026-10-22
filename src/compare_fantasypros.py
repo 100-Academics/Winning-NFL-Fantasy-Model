@@ -42,10 +42,8 @@ STAT_MAP = {
     "TE": {"rec_rec": "receptions", "rec_yds": "receiving_yards",
            "rec_tds": "receiving_tds"},
 }
-# Standard 1-PPR (for the points-level readout; matches bench.py).
-SCORE = {"passing_yards": .1, "rushing_yards": .1, "receiving_yards": .1,
-         "passing_tds": 6, "rushing_tds": 6, "receiving_tds": 6,
-         "receptions": 1, "passing_interceptions": -2}
+# ESPN Standard (for the points-level readout; matches src.scoring / bench.py).
+from src.scoring import ESPN_STANDARD as SCORE
 
 SUFFIXES = [" II", " III", " IV", " Jr.", " Sr."]
 
@@ -176,7 +174,7 @@ def main() -> None:
           f" {so['spearman']:>9.3f}{sf['spearman']:>8.3f}")
 
     # Points-level (standard 1-PPR) readout per position.
-    print(f"\nStandard 1-PPR weekly points (2024 test, head-to-head):")
+    print(f"\nESPN Standard weekly points (2024 test, head-to-head):")
     print(f"{'pos':<3}{'n':>5}  {'OURS pts':>12}{'FANTASYPROS':>14}{'rho ours':>9}{'rho FP':>8}")
     print("-" * 78)
     for pos in POS_TARGETS:
