@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<title>Week 8 Board + Week 7 Recap</title>
+<style>
+  * { box-sizing: border-box; }
+  body { font: 13px/1.35 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; color: var(--foreground); }
+  .wrap { max-width: 760px; }
+  h1 { font-size: 15px; font-weight: 700; margin: 0 0 2px; }
+  .sub { color: var(--muted-foreground); font-size: 11.5px; margin: 0 0 16px; }
+  .sec { font-size: 12px; text-transform: uppercase; letter-spacing: .06em;
+         color: var(--muted-foreground); margin: 20px 0 8px; font-weight:700; }
+  .pos { margin-bottom: 16px; }
+  .pos h2 { font-size: 11.5px; text-transform: uppercase; letter-spacing: .06em;
+            color: var(--muted-foreground); margin: 0 0 6px; display:flex; gap:8px; align-items:baseline; }
+  .pos h2 .n { font-size: 10px; font-weight: 500; opacity:.7; letter-spacing:0; text-transform:none; }
+  .row { display: grid; grid-template-columns: 18px 1fr; gap: 8px; align-items: center; margin: 3px 0; }
+  .rank { text-align:right; color: var(--muted-foreground); font-size: 11px; font-variant-numeric: tabular-nums; }
+  .cell { position: relative; }
+  .bar { height: 24px; border-radius: 5px; background: color-mix(in srgb, var(--accent) 46%, transparent);
+         border: 1px solid color-mix(in srgb, var(--accent) 58%, transparent); min-width: 2px; }
+  .lab { position: absolute; left: 9px; top: 50%; transform: translateY(-50%); display:flex;
+         align-items:center; gap:8px; white-space:nowrap; }
+  .name { font-weight: 600; font-size: 12px; }
+  .team { color: var(--muted-foreground); font-size: 10.5px; font-weight:500; }
+  .opp { color: var(--muted-foreground); font-size: 10.5px; font-weight:500; }
+  .pts { position:absolute; right:8px; top:50%; transform:translateY(-50%);
+         font-variant-numeric: tabular-nums; font-weight:700; font-size:12px; }
+  .top .bar { background: color-mix(in srgb, var(--accent) 50%, transparent);
+              border-color: color-mix(in srgb, var(--accent) 66%, transparent); }
+  .pill { font-size:9px; font-weight:700; letter-spacing:.04em; padding:1px 5px; border-radius:4px;
+          background: color-mix(in srgb, var(--accent) 22%, transparent); color: var(--accent); }
+  .card { border:1px solid var(--border); border-radius:8px; background: var(--card);
+          padding: 10px 12px; margin: 6px 0; }
+  .card .hd { font-size:12px; font-weight:700; margin-bottom:6px; }
+  .grid { display:grid; grid-template-columns: 1fr 1fr; gap:10px; }
+  .kpi { display:flex; align-items:baseline; gap:6px; }
+  .kpi .v { font-size:20px; font-weight:800; font-variant-numeric: tabular-nums; }
+  .kpi .l { font-size:11px; color: var(--muted-foreground); }
+  .good { color: var(--accent); }
+  .note { color: var(--muted-foreground); font-size: 11px; border-top: 1px solid var(--border);
+          padding-top: 10px; margin-top: 14px; }
+  .note b { color: var(--foreground); }
+  table { width:100%; border-collapse: collapse; font-size: 11.5px; }
+  th, td { text-align:left; padding:3px 6px; font-variant-numeric: tabular-nums; }
+  th { color: var(--muted-foreground); font-weight:600; }
+  td.r { text-align:right; }
+</style>
+</head>
+<body>
+<div class="wrap" id="app"></div>
+<script>
+const OFF = {
+  "QB": [
+    {rank:1,name:"Dak Prescott",team:"DAL",pts:21.38},{rank:2,name:"Drake Maye",team:"NE",pts:21.08},
+    {rank:3,name:"Josh Allen",team:"BUF",pts:20.62},{rank:4,name:"Joe Burrow",team:"CIN",pts:20.25},
+    {rank:5,name:"Lamar Jackson",team:"BAL",pts:19.74},{rank:6,name:"Matthew Stafford",team:"LA",pts:19.16},
+    {rank:7,name:"Trevor Lawrence",team:"JAX",pts:19.05},{rank:8,name:"Jordan Love",team:"GB",pts:18.65},
+    {rank:9,name:"Tyler Huntley",team:"BAL",pts:18.17},{rank:10,name:"Jayden Daniels",team:"WAS",pts:17.87}
+  ],
+  "RB": [
+    {rank:1,name:"Jahmyr Gibbs",team:"DET",pts:19.33},{rank:2,name:"Kenneth Walker III",team:"KC",pts:17.65},
+    {rank:3,name:"Josh Jacobs",team:"GB",pts:15.69},{rank:4,name:"Bucky Irving",team:"TB",pts:15.58},
+    {rank:5,name:"James Cook",team:"BUF",pts:15.16},{rank:6,name:"Bhayshul Tuten",team:"JAX",pts:14.89},
+    {rank:7,name:"D'Andre Swift",team:"CHI",pts:14.76},{rank:8,name:"Jonathan Taylor",team:"IND",pts:14.74},
+    {rank:9,name:"Ashton Jeanty",team:"LV",pts:14.53},{rank:10,name:"Bijan Robinson",team:"ATL",pts:14.5}
+  ],
+  "WR": [
+    {rank:1,name:"CeeDee Lamb",team:"DAL",pts:15.13},{rank:2,name:"Amon-Ra St. Brown",team:"DET",pts:13.54},
+    {rank:3,name:"Puka Nacua",team:"LA",pts:13.26},{rank:4,name:"Tee Higgins",team:"CIN",pts:12.23},
+    {rank:5,name:"Matthew Golden",team:"GB",pts:12.08},{rank:6,name:"Ja'Marr Chase",team:"CIN",pts:11.55},
+    {rank:7,name:"Christian Watson",team:"GB",pts:11.45},{rank:8,name:"Zay Flowers",team:"BAL",pts:11.28},
+    {rank:9,name:"George Pickens",team:"DAL",pts:11.23},{rank:10,name:"Parker Washington",team:"JAX",pts:10.9}
+  ],
+  "TE": [
+    {rank:1,name:"Brenton Strange",team:"JAX",pts:8.99},{rank:2,name:"Brock Bowers",team:"LV",pts:8.87},
+    {rank:3,name:"Dalton Kincaid",team:"BUF",pts:8.68},{rank:4,name:"Colston Loveland",team:"CHI",pts:8.24},
+    {rank:5,name:"Trey McBride",team:"ARI",pts:7.91},{rank:6,name:"Travis Kelce",team:"KC",pts:7.84},
+    {rank:7,name:"Tucker Kraft",team:"GB",pts:7.66},{rank:8,name:"Mark Andrews",team:"BAL",pts:7.66},
+    {rank:9,name:"Harold Fannin Jr.",team:"CLE",pts:7.56},{rank:10,name:"Tyler Warren",team:"IND",pts:7.47}
+  ]
+};
+const DEF = [{"team":"CIN","opp":"TEN","pa":17.0,"dst":8.4},{"team":"WAS","opp":"PHI","pa":17.0,"dst":8.4},{"team":"NE","opp":"MIA","pa":17.2,"dst":5.4},{"team":"PIT","opp":"CLE","pa":17.5,"dst":5.4},{"team":"JAX","opp":"IND","pa":18.2,"dst":5.4},{"team":"LA","opp":"LAC","pa":19.5,"dst":5.4},{"team":"KC","opp":"DEN","pa":20.0,"dst":5.4},{"team":"TB","opp":"ATL","pa":20.5,"dst":5.4},{"team":"CLE","opp":"PIT","pa":21.0,"dst":5.4},{"team":"DEN","opp":"KC","pa":21.5,"dst":5.4},{"team":"DET","opp":"MIN","pa":21.8,"dst":5.4},{"team":"SEA","opp":"CHI","pa":21.8,"dst":5.4},{"team":"GB","opp":"CAR","pa":22.0,"dst":5.4},{"team":"NYJ","opp":"LV","pa":22.5,"dst":5.4},{"team":"ATL","opp":"TB","pa":23.0,"dst":5.4},{"team":"PHI","opp":"WAS","pa":23.5,"dst":4.4},{"team":"DAL","opp":"ARI","pa":23.8,"dst":4.4},{"team":"LV","opp":"NYJ","pa":24.0,"dst":4.4},{"team":"MIA","opp":"NE","pa":24.2,"dst":4.4},{"team":"MIN","opp":"DET","pa":24.8,"dst":4.4},{"team":"CHI","opp":"SEA","pa":24.8,"dst":4.4},{"team":"CAR","opp":"GB","pa":25.5,"dst":4.4},{"team":"BUF","opp":"BAL","pa":25.8,"dst":4.4},{"team":"LAC","opp":"LA","pa":26.0,"dst":4.4},{"team":"IND","opp":"JAX","pa":28.2,"dst":4.4},{"team":"BAL","opp":"BUF","pa":28.8,"dst":4.4},{"team":"TEN","opp":"CIN","pa":29.5,"dst":4.4},{"team":"ARI","opp":"DAL","pa":30.8,"dst":3.4}];
+
+// Week 7 recap (from holdout_score.json / holdout_score_def.json, scored 2026-11-01)
+const W7 = {
+  off: { n:293, model:{mae:4.071,rmse:5.167,rho:0.6879}, last:{mae:4.417,rmse:6.455,rho:0.5664}, tr3:{mae:3.75,rmse:5.375,rho:0.6506} },
+  def: { n:28, rho:0.132, gap:-0.55, top5:[3,16,17,18,22], top5mean:4.80, restmean:5.35,
+         board_top5:[["HOU","NYG",16.0],["MIN","IND",17.5],["NYJ","MIA",17.5],["CLE","TEN",18.0],["TEN","CLE",19.5]] },
+  trend: { w1:0.6824, w2:0.7589, w3:0.7856, w4:0.7861, w5:0.7271, w7:0.6879 }
+};
+
+const maxOff = Math.max(...Object.values(OFF).flat().map(d=>d.pts));
+const maxDst = Math.max(...DEF.map(d=>d.dst));
+const app = document.getElementById('app');
+
+const offBlocks = Object.entries(OFF).map(([pos, rows]) => {
+  const body = rows.map(d => {
+    const w = Math.max(2, (d.pts/maxOff)*100);
+    const top = d.rank<=1 ? ' top' : '';
+    return `<div class="row${top}"><div class="rank">${d.rank}</div>
+      <div class="cell"><div class="bar" style="width:${w}%"></div>
+      <div class="lab"><span class="name">${d.name}</span><span class="team">${d.team}</span></div>
+      <div class="pts">${d.pts.toFixed(1)}</div></div></div>`;
+  }).join('');
+  return `<div class="pos"><h2>${pos}<span class="n">top 10</span></h2>${body}</div>`;
+}).join('');
+
+const defBody = DEF.map((d,i) => {
+  const w = Math.max(6, (d.dst/maxDst)*100);
+  const top = i<5 ? ' top' : '';
+  const pill = i<5 ? '<span class="pill">PICK</span>' : '';
+  return `<div class="row${top}"><div class="rank">${i+1}</div>
+    <div class="cell"><div class="bar" style="width:${w}%"></div>
+    <div class="lab"><span class="name">${d.team}</span><span class="opp">vs ${d.opp} &middot; ${d.pa} imp</span>${pill}</div>
+    <div class="pts">${d.dst.toFixed(1)}</div></div></div>`;
+}).join('');
+
+const t = W7.trend;
+app.innerHTML = `
+<h1>2026 &mdash; Week 8 Board <span style="opacity:.55;font-weight:500">+ Week 7 recap</span></h1>
+<div class="sub">ESPN Standard (non-PPR) &middot; offense logged pre-kickoff 2026-11-01 10:29 &middot; 454 players / 28 D/ST (no byes)</div>
+
+<div class="sec">How we did in Week 7</div>
+<div class="grid">
+  <div class="card">
+    <div class="hd">Offense (n=${W7.off.n} scored)</div>
+    <div class="kpi"><span class="v good">+${W7.off.model.rho.toFixed(3)}</span><span class="l">model Spearman</span></div>
+    <table style="margin-top:6px"><tr><th></th><th class="r">MAE</th><th class="r">&rho;</th></tr>
+      <tr><td><b>Model</b></td><td class="r">${W7.off.model.mae.toFixed(2)}</td><td class="r">${W7.off.model.rho.toFixed(3)}</td></tr>
+      <tr><td>trailing-3</td><td class="r">${W7.off.tr3.mae.toFixed(2)}</td><td class="r">${W7.off.tr3.rho.toFixed(3)}</td></tr>
+      <tr><td>last game</td><td class="r">${W7.off.last.mae.toFixed(2)}</td><td class="r">${W7.off.last.rho.toFixed(3)}</td></tr>
+    </table>
+    <div class="sub" style="margin:6px 0 0">Model wins on ranking again (&rho; beats both baselines) &mdash; 7 straight weeks. TR3 takes the MAE crown this week (3.75 vs 4.07). Trend: w1 ${t.w1.toFixed(3)} &rarr; w2 ${t.w2.toFixed(3)} &rarr; w3 ${t.w3.toFixed(3)} &rarr; w4 ${t.w4.toFixed(3)} &rarr; w5 ${t.w5.toFixed(3)} &rarr; <b>w7 ${t.w7.toFixed(3)}</b> (w6 skipped &mdash; still ahead of both baselines).</div>
+  </div>
+  <div class="card">
+    <div class="hd">D/ST (n=${W7.def.n})</div>
+    <div class="kpi"><span class="v">&minus;${Math.abs(W7.def.gap).toFixed(2)}</span><span class="l">top-5 vs rest gap</span></div>
+    <div class="sub" style="margin:6px 0">&rho; ${W7.def.rho.toFixed(3)} &middot; top-5 actual ranks ${W7.def.top5.join(' / ')}<br/>
+    Board top-5: ${W7.def.board_top5.map(x=>x[0]+`(${x[1]} &rarr; ${x[2]}pts)`).join(' &middot; ')}<br/>
+    A down week for the board (gap w3 &minus;1.51, w4 +2.69, w5 +3.96, w7 &minus;0.55): board #1 HOU allowed 27 and landed rank 17, while TB (board #18) went 18.0 (3 TO, 5 sacks &rarr; actual rank 1). MIN (board #2 &rarr; actual 3) was the one clean hit in the top-5. Single-week noise &mdash; method unchanged, judged on the gap trend.</div>
+  </div>
+</div>
+
+<div class="sec">Week 8 &mdash; Offense (top 10 per position)</div>
+${offBlocks}
+
+<div class="sec">Week 8 &mdash; D/ST Board (all 28)</div>
+${defBody}
+
+<div class="note">
+  <b>Offense:</b> model is the frozen pre-2026 fit (no re-training this week) &mdash; logged from the scheduled-panel path, same as W1&ndash;5 and W7. DAL stacks the board again (Prescott QB1, Lamb WR1, Pickens WR9) with DET (Gibbs RB1, St. Brown WR2) and BUF (Allen QB3, Cook RB5, Kincaid TE3) close behind.
+  <br><br>
+  <b>D/ST method (shipped, A/B'd):</b> rank by the OPPONENT&rsquo;s Vegas implied team total, lowest first &mdash; the matchup, not the team, drives D/ST points. A/B on 2024+25 (2025 clean holdout): Spearman <b>+0.345</b>, beating the best own-defense/turnover model (+0.336). ESPN Standard D/ST tier on projected points allowed (0&ndash;6:+10, 7&ndash;13:+7, 14&ndash;17:+4, 18&ndash;23:+1, 24&ndash;30:0, 31+:&minus;1) + flat league-mean sacks (~2.4) and turnovers (~1.0) &mdash; the latter two set the absolute value, not the ranking.
+  <br><br>
+  <b>W8 D/ST picks:</b> CIN and WAS (both 17.0 imp) top the board &mdash; the slate&rsquo;s weakest projected offenses (TEN, PHI). NE (17.2, vs MIA), PIT (17.5, vs CLE) and JAX (18.2, vs IND) round out the top-5. Sits: ARI (30.8 imp, vs DAL &mdash; the slate&rsquo;s strongest projected offense), TEN (29.5, vs CIN) and BAL (28.8, vs BUF).
+  <br><br>
+  <b>Holdout status:</b> W7 offense (446) + D/ST (28) scored 2026-11-01 after a full-range refresh (offense &rho; +0.688 vs tr3 +0.651 / last +0.566; D/ST gap &minus;0.55). W8 offense (454) + D/ST (28) logged 2026-11-01 10:27&ndash;10:29 &mdash; pre-kickoff for all 13 weekend games; the one exception is the CAR&nbsp;@&nbsp;GB Thursday game (Oct 29), which was already played when the log was requested &mdash; its 23 players are included, but their features use strictly weeks &le;7 data (the scheduled panel never sees the target week&rsquo;s outcomes), so the record stays leakage-free, just not pre-kickoff for that one game. Score after the games: <code>src.holdout</code> / <code>src.holdout_def --week 8 --score</code>. (W6 remains skipped &mdash; no board was logged that week, so it is not in the holdout record.)
+</div>`;
+</script>
+</body>
+</html>

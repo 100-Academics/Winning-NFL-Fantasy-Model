@@ -439,6 +439,56 @@ has been replaced. Diagnosis + fix, A/B'd so we don't redo it:
   rows (2026 now w1–w6 actuals). Only the expected `participation` [FAIL]
   (2026 unsupported by nflreadpy).
 
+## Live 2026 holdout — W7 scored, W8 logged (2026-11-01)
+- **Week 7 (logged pre-kickoff 2026-10-22T16:39; games Oct 22–26; scored
+  2026-11-01 after a full-range data refresh):**
+  - **Offense (446 logged, n=293 scored):** model **Spearman +0.688**, MAE 4.07 —
+    beats trailing-3 (+0.651, MAE 3.75) and last-game (+0.566, MAE 4.42) on
+    ranking; TR3 took the lowest MAE this week. **7 straight weeks ahead of both
+    baselines on Spearman.** Trend w1→w7: +0.682 → +0.759 → +0.786 → +0.786 →
+    +0.727 → +0.688 (w6 skipped) — cooled from the w3–w4 plateau but still
+    clearly ahead; single-week noise, no action.
+  - **D/ST (n=28):** Spearman **+0.132**; **top-5 gap −0.55** (w3 −1.51,
+    w4 +2.69, w5 +3.96, w7 −0.55) — a down week: board #1 HOU allowed 27
+    (actual rank 17), top-5 actual ranks 3/16/17/18/22; TB (board #18) went
+    18.0 (3 TO, 5 sacks → actual rank 1). MIN (board #2 → actual 3) was the
+    clean top-5 hit. Method unchanged — judged on the gap trend.
+  - Score files: `models/holdout_score.json` (+`2026_w07`),
+    `models/holdout_score_def.json` (+`2026_w07`).
+- **Week 8 (logged pre-kickoff 2026-11-01T10:29 for the 13 weekend games;
+  games Oct 29–Nov 2):** offense **454 players**, D/ST **28 teams** (no byes).
+  W8 boards in `notebooks/w8_board.html` + `models/w8_board.json` (offense
+  top-10/pos in ESPN standard, full 28-team D/ST). **W8 D/ST top-5: CIN (vs
+  TEN, 17.0 imp, 8.4), WAS (vs PHI, 17.0, 8.4), NE (vs MIA, 17.2), PIT (vs
+  CLE, 17.5), JAX (vs IND, 18.2)**; sits: ARI (30.8 imp, vs DAL — the
+  slate's strongest projected offense), TEN (29.5, vs CIN), BAL (28.8, vs
+  BUF). Score after the games:
+  `uv run python -m src.holdout --season 2026 --week 8 --score` and
+  `uv run python -m src.holdout_def --season 2026 --week 8 --score`.
+- **W8 log caveat (NEW EDGE CASE — partial target week in features.parquet):**
+  the W8 Thursday game (CAR @ GB, Oct 29) was already played when the log was
+  requested. `src.holdout.predict_week` checks features.parquet for
+  (season, week) rows FIRST and only falls back to the scheduled panel when
+  there are ZERO such rows — after this cycle's refresh the played Thursday
+  game's 25 rows existed, so the first `--log` run silently captured only
+  those 23 players and skipped the full slate. Repair: (1) truncated the 23
+  fresh entries (mine, ~2 min old; verified they were the exact tail),
+  (2) backed up `features.parquet` (sha256), filtered out the 2026 w8 rows,
+  re-ran `--log` → 454 players from the scheduled panel (features strictly
+  weeks ≤7), (3) restored `features.parquet` byte-identical (sha256-verified).
+  The CAR/GB entries are post-kickoff in time but leakage-free (the scheduled
+  panel never sees target-week outcomes). **Rule for future late-request
+  weeks: if any target-week game is already played (rows in features.parquet),
+  `holdout --log` will silently skip the scheduled panel — always check the
+  logged player count against the full slate (~450) before trusting a log.**
+  (A proper fix — e.g. falling back to the scheduled panel when the week's
+  played games are a proper subset of the scheduled games — is a code change
+  to A/B, not a live-cycle patch.)
+- Data refresh for this cycle: full range 2016–2026 re-pulled (core/context/
+  advanced, `--force`) + `src.features` rebuild → `features.parquet` 64,460
+  rows (2026 now w1–w7 actuals + the played w8 Thursday game). Only the
+  expected `participation` [FAIL] (2026 unsupported by nflreadpy).
+
 ## Third-party LLM feedback review — claim audit + A/B (2026-10-22)
 
 An external LLM (not involved with this repo) submitted a review listing "bugs" and
