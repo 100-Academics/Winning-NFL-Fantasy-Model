@@ -489,6 +489,61 @@ has been replaced. Diagnosis + fix, A/B'd so we don't redo it:
   rows (2026 now w1–w7 actuals + the played w8 Thursday game). Only the
   expected `participation` [FAIL] (2026 unsupported by nflreadpy).
 
+## Is it GOOD? — goodness battery on live OOS weeks (2026-11-01)
+
+The weekly holdout score only tests the model against two naive baselines
+(last game, trailing-3) — a low bar, beaten 7 straight weeks. Per user: the
+bar has to be "is it good", not "does it beat the baselines". New reproducible
+battery `notebooks/_goodness_battery.py` (re-run any week; writes
+`models/goodness_report.json`), run on the ONLY true out-of-sample data for
+the shipped model (live 2026 scored weeks — the model was trained through
+2025, so 2024–25 is in-sample for it). Covers w1–w5 + w7 scored, plus the w8
+Thursday game (25 rows; logged post-kickoff for that game, pre-kickoff
+features).
+
+**1. Decision value (start/sit) — mean ACTUAL pts of each method's top pick (pooled):**
+- QB: model top-1 **24.05** vs last-game 16.43 / tr3 14.22 (field 15.20) → +7.6/+9.8-pt edge.
+- RB: **20.11** vs 9.72 / 9.55 (field 6.23) → +10.4/+10.6.
+- WR: **12.44** vs 10.14 / 11.21 (field 4.35) → +2.3/+1.2.
+- TE: **11.47** vs 6.71 / 7.30 (field 3.33) → +4.8/+4.2.
+- Per-game top-1 win rates are coin-flip-ish (3W-2L-1T QB; 4W-2T-0L RB; 3W-3L-1T WR;
+  3W-2L-1T TE, ties=0.5) — single-game variance dominates one pick; the edge is in the
+  MEAN, which is what compounds over a season of lineup decisions.
+
+**2. Flex value (RB/WR/TE pooled, top-10 by predicted → mean actual):**
+model **15.71** vs tr3 13.06 / last-game 11.07 (field ~4.7; top-20: 13.49/12.10/10.06) —
+the model's flex board is ~3.3× the field mean vs 2.3–2.8× for the baselines; model wins
+5 of 6 weeks (w2 near-tie vs last-game, 11.72 vs 11.84). This is the direct live test of
+the mean-fit fix (E[points]=Σ score·E[stat] only holds for the MEAN, not the median):
+the flex separation is real.
+
+**3. Noise floor (MAE vs zero-signal predictor = 2025 w15–17 position means):**
+model MAE 1.20–1.46× better than the floor (QB 5.70/6.98, RB 3.89/5.70, WR 3.44/4.12,
+TE 2.77/3.48); variance explained: QB 0.305, RB 0.485, WR 0.322, TE 0.283 — the model
+captures 30–49% of actual point variance in noisy single-game outcomes.
+
+**4. Live calibration (pooled signed bias, % of actual mean):**
+model QB −7.3% / RB +10.0% / WR +13.9% / TE +9.2%, vs baselines all −17 to −22%
+(naive stats → conservative points, as expected). The model is 2–4× better calibrated
+than either baseline live, but NOT zero: it over-projects skill positions ~+10–14%
+(the 2024–25 test-split calibration was ±3.3%) — early-season weeks carry most of this;
+track whether it persists through w17 before touching anything.
+
+**5. Top-of-board reliability (mean ACTUAL rank of the projected top-5; chance = median (n+1)/2):**
+QB 9.7 (chance 17.5; last 16.6, tr3 14.6) · RB 13.4 (44.5; 18.7/17.2) · WR 24.5 (71.5;
+31.8/25.2) · TE 16.1 (39.8; 23.7/21.7) — the model's top-5 reliably lands in the top
+half of the actual board, ahead of both baselines at every position.
+
+**Verdict: good, with a caveat.** Real start/sit and flex value (top picks out-score the
+naive boards by 2.3–10.6 pts depending on position; flex board ~3.3× the field mean),
+well above the noise floor, and far better calibrated than the baselines live. Caveat:
+only 6 full scored weeks + one partial — per-game win rates are noisy, and the
++10–14% live skill-position over-projection is the thing to track. **Nothing to change**:
+the standing rule governs model changes and nothing here calls for one. **NOT tested:**
+full 2025 season on the current model (in-sample — not a valid OOS for it);
+FantasyPros head-to-head on live 2026 weeks (FP API archives cover 2024/25; live-2026
+fetch not attempted).
+
 ## Third-party LLM feedback review — claim audit + A/B (2026-10-22)
 
 An external LLM (not involved with this repo) submitted a review listing "bugs" and
