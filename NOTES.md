@@ -489,6 +489,141 @@ has been replaced. Diagnosis + fix, A/B'd so we don't redo it:
   rows (2026 now w1–w7 actuals + the played w8 Thursday game). Only the
   expected `participation` [FAIL] (2026 unsupported by nflreadpy).
 
+## Live 2026 holdout — W8–10 backfilled & scored, W11 logged (2026-11-17)
+- **Context:** W9 and W10 were missed in the live loop (model used for other
+  work over that stretch); W8 had been logged 2026-11-01 but never scored.
+  All three backfilled 2026-11-17: full data refresh (`--force`; W9–W10
+  actuals + W11 lines landed) + `src.features` rebuild (65,466 rows; 2026 now
+  w1–w10 actuals) + replay `--log` with the **frozen V6 model** (features
+  strictly prior-week; the log path never sees target-week outcomes), then
+  scored. No model change — the standing decision rule was not invoked.
+- **Offense (Spearman vs baselines, ESPN Standard):**
+  - W8 (289 scored): model **+0.678** (MAE 4.28) vs tr3 +0.644 (3.86) / last +0.576 (4.34)
+  - W9 (337): model **+0.718** (MAE 3.37) vs tr3 +0.631 (3.66) / last +0.556 (4.27)
+  - W10 (299): model **+0.701** (MAE 3.46) vs tr3 +0.605 (4.08) / last +0.557 (4.66)
+  - Model ahead on ranking all three weeks; W9 and W10 per-position: model
+    wins all four positions (W8's one exception was QB, last-game's week:
+    model +0.326 vs last +0.373).
+  - Season trend: w1 +0.682 → w2 +0.759 → w3 +0.786 → w4 +0.786 → w5 +0.727 →
+    (w6 skipped) → w7 +0.688 → w8 +0.678 → w9 +0.718 → w10 +0.701.
+- **D/ST (top-5 gap vs rest):** w8 **+7.15** (ρ +0.226; top-5 actual ranks
+  1/3/4/10/21 — board #1 CIN was actual rank 1), w9 **+6.72** (ρ +0.630;
+  ranks 2/5/6/8/9), w10 **+3.91** (ρ +0.501; ranks 1/6/17/18 — board #1 LA
+  vs ARI went 19.0 pts, actual rank 1). Three straight positive-gap weeks.
+  W10: 2 teams unscored (incomplete games) — 28 logged, 26 scored. Gap
+  trend: w3 −1.51 → w4 +2.69 → w5 +3.96 → w7 −0.55 → w8 +7.15 → w9 +6.72 →
+  w10 +3.91.
+- **Week 11 (logged pre-kickoff 2026-11-17T00:12; games Nov 19–22):**
+  offense **470 players**, D/ST **26 teams** (13 games). Scheduled-panel path
+  (no W11 rows in features.parquet yet — the fallback fired and the logged
+  count was verified against the full slate). Boards:
+  `notebooks/w11_board.html` + `models/w11_board.json`. **W11 D/ST top-5: KC
+  (vs ARI, 12.5 imp, 11.4), BUF (vs MIA, 14.5), DEN (vs LV, 15.2), HOU (vs
+  IND, 16.5), PIT (vs PHI, 17.0)**; sits: TEN (31.5 imp, vs DAL — the
+  slate's strongest projected offense), MIA (31.0, vs BUF), NO (30.0, vs
+  CHI), WAS (29.5, vs CIN), ARI (29.0, vs KC).
+- **Score after the games:** `uv run python -m src.holdout --season 2026 --week 11 --score`
+  and `uv run python -m src.holdout_def --season 2026 --week 11 --score`.
+- Data refresh: 10/11 datasets updated; only the expected `participation`
+  [FAIL] (nflreadpy season range caps at 2025) — the 2026-09-29 file stays.
+
+## Third-party audit — claim verification + A/B + fixes (2026-11-17)
+
+A third-party LLM audited the model (claims about current performance, four
+improvement proposals, a 5-tier weekly evaluation suite). Every testable
+claim verified against the artifacts; every proposal A/B'd on the clean 2025
+holdout before adoption.
+
+### Claim verification (third-party claim → verdict)
+
+- **2024 H2H vs FantasyPros** (MAE/RMSE wins at all positions, 10-14 stat
+  components, Spearman 0.655 vs 0.601): TRUE — `models/fantasypros_report.json`.
+- **2026 live numbers** (R² 30.5–48.5%, WR +13.9% / TE +9.2% signed bias,
+  top-5 ranks 9.7/13.4/24.5/16.1, MAE 5.70/3.89/3.44/2.77): EXACT match —
+  `models/goodness_report.json`.
+- **"Full-roster Spearman is padded by bench rows"**: CONFIRMED. Within-slice
+  (starter pools: top-12 QB/TE, top-24 RB/WR) Spearman on the scored 2026
+  weeks is +0.2 to +0.4 vs +0.67 to +0.76 full-roster
+  (`notebooks/_tier1_lite.py`). The headline ρ overstates decision-tier
+  discrimination; the model's edge is "whose #1 pick is better" (top-1
+  actuals +1.2 to +10.6 pts over baselines).
+- **"No pooled season-long 2026 scoreboard vs FantasyPros yet"**: TRUE —
+  only W4/W5 one-off checks exist (`_h2h_w4.py`, `_fp_w5.py`).
+- **TD-band degeneracy** (47.6% of WR `receiving_tds`, 16.5% of RB
+  `rushing_tds` rows with p90 < mean): VERIFIED — `models/diag_post_mean_fix.json`;
+  309 degenerate TD bands exist on the W11 panel alone.
+- **`snap_counts.parquet` downloaded but never wired into features**: TRUE
+  (grep of `src/features.py` was empty).
+- **`predict.py --refresh` clobbers 2016-2024 history**: TRUE —
+  `download()` overwrote the whole parquet with a 2-season pull.
+- **Partial-week logging bug (W8 Thursday game)**: TRUE — `predict_week`
+  only fell back to the scheduled panel when the week had zero rows in
+  features.parquet; a played Thursday game left the rest of the slate unlogged.
+- **OUR FIND, not in the audit: the prior-season bridge was never in the
+  model.** `_prev_season_bridge`'s final `select` kept only
+  (player_id, season) and dropped all 7 bridge columns — since the 2026-10-22
+  commit that introduced it. Every "V6 with bridge" claim in NOTES
+  overstates what actually shipped. Fixed; A/B'd below.
+
+### A/B results
+
+**Audit proposals** (`notebooks/_exp_audit_ab.py` → `models/ab_audit_report.json`;
+train 2016-23, test 2025, shipped hyperparameters per model; the arm
+comparison is internal to this script's procedure):
+
+| arm | pooled MAE | pooled ρ | early ρ |
+| --- | --- | --- | --- |
+| V0 baseline | 3.885 | 0.5633 | 0.5569 |
+| V1 + snap share | 3.882 | 0.5658 | 0.5594 |
+| V2 + vacated opportunity | 3.874 | 0.5644 | 0.5573 |
+| **V3 both (ADOPTED)** | **3.868** | **0.5674** | **0.5597** |
+
+V3 best on both pooled metrics and early-season ρ; 14/16 stats non-negative
+(worst regression −0.0005).
+
+**Bridge** (bug fix, `notebooks/_exp_bridge_ab.py` + `models/ab_bridge_report2.json`;
+shipped procedure: position-filtered splits, full 48-config grid on 2024 val):
+A (no bridge) pooled ρ +0.6586 MAE 4.919, 15/16 beats-baseline;
+B (bridge) ρ +0.6589 MAE 4.907, 15/16 — **within noise**. Fix kept (the
+function now does what it documents) and the columns ship, but they earn
+nothing on 2025.
+
+### Shipped changes
+
+- `src/features.py` — +2 snap-share features (`offense_pct` tr3/s2d from
+  `snap_counts.parquet`) + 3 vacated-opportunity features (Out/Doubtful
+  same-position teammates' trailing targets/carries + count; backward-asof so
+  injured players without a week-W stats row still contribute). Both strictly
+  prior. `load_snap_counts()` / `load_injury_reports()`; the scheduled-panel
+  path passes both in as well (`src/holdout.py`), so upcoming weeks don't get
+  null columns.
+- `src/features.py` — `_prev_season_bridge` regression fix (select dropped
+  all 7 bridge columns).
+- `src/holdout.py` — partial-week guard: scheduled panel is now used whenever
+  the target week is not FULLY played (every game has a final score), not
+  only when features.parquet has zero rows. Regression test:
+  `tests/test_partial_week_guard.py`.
+- `src/download_data.py` — partial re-pulls now MERGE: only the pulled
+  seasons are replaced, historical seasons are kept. `--refresh` no longer
+  clobbers 2016-2024.
+- `src/predict.py` — degenerate TD bands (p90 < mean) now display
+  `P(TD>=1) = 1 − e^{−μ}` instead of a dead "(0.0-1.0)" interval
+  (e.g. `0.0 receiving TDs (P(TD>=1) 4%)`).
+- Model retrained (snap + vac + bridge columns present): 2025 test
+  10/16 beats-baseline (MAE gate), ranking strong on the decision stats
+  (QB pass yds ρ +0.610, RB rush yds +0.795, WR rec yds +0.714, TE rec yds
+  +0.702). **W11's logged projections were recorded pre-kickoff with the
+  pre-audit model and stand as logged; the new model governs W12 onward.**
+
+### Not yet built (audit's 5-tier suite — proposed follow-ups)
+
+- Tiers 1-4 as a permanent weekly battery (starter-pool ρ/NDCG, start/sit
+  fringe pairwise win-rate, flex position-share calibration, top-10
+  hit/bust rate + empirical band coverage). `notebooks/_tier1_lite.py` is
+  the Tier-1 stub.
+- Tier 5: auto-fetch the FantasyPros top-10 board on `--log`, cumulative
+  2026 live scoreboard on `--score`.
+
 ## Is it GOOD? — goodness battery on live OOS weeks (2026-11-01)
 
 The weekly holdout score only tests the model against two naive baselines

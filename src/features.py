@@ -273,6 +273,106 @@ def _attach_usage_shares(feat: pl.DataFrame,
                      on=["season", "week", "player_id"], how="left")
 
 
+# --------------------------------------------------------------------------- #
+# Snap share + vacated opportunity (audit A/B 2026-11-17, notebooks/_exp_audit_ab.py)
+# --------------------------------------------------------------------------- #
+SNAP_FEATURES = ["snap_pct_tr3", "snap_pct_s2d"]
+VAC_FEATURES = ["vac_targets_tr3", "vac_carries_tr3", "n_vacated"]
+
+
+def load_snap_counts(raw_dir: pathlib.Path = RAW_DIR) -> pl.DataFrame:
+    """Per-game offensive snap share (NGS ``offense_pct``), REG, by display name."""
+    try:
+        df = pl.read_parquet(raw_dir / "snap_counts.parquet")
+    except FileNotFoundError:
+        return pl.DataFrame()
+    return (df.filter((pl.col("game_type") == "REG")
+                      & pl.col("position").is_in(["QB", "RB", "WR", "TE"]))
+            .select(["season", "week", "player", "offense_pct"])
+            .rename({"player": "player_display_name"})
+            .cast({"season": pl.Int32, "week": pl.Int32})
+            .sort(["player_display_name", "season", "week"])
+            .unique(subset=["season", "week", "player_display_name"]))
+
+
+def load_injury_reports(raw_dir: pathlib.Path = RAW_DIR) -> pl.DataFrame:
+    """Official pre-game Out/Doubtful designations, one row per
+    (season, week, team, position, player)."""
+    try:
+        df = pl.read_parquet(raw_dir / "injuries.parquet")
+    except FileNotFoundError:
+        return pl.DataFrame()
+    return (df.filter(pl.col("report_status").is_in(["Out", "Doubtful"]))
+            .select(["season", "week", "team", "position", "gsis_id"])
+            .cast({"season": pl.Int32, "week": pl.Int32})
+            .unique())
+
+
+def _attach_snap_shares(feat: pl.DataFrame,
+                        snaps: pl.DataFrame | None) -> pl.DataFrame:
+    """Trailing share of offensive snaps (``offense_pct`` tr3/s2d).
+
+    2026-11-17 audit A/B (notebooks/_exp_audit_ab.py, clean 2025 holdout):
+    V1 alone pooled rho 0.5633 -> 0.5658, MAE 3.885 -> 3.882; combined with
+    vacated opportunity (V3) pooled rho 0.5674, MAE 3.868, and no stat
+    regressed by more than 0.001. Distinguishes a cold-streak 75%-snap
+    starter from a 15%-snap backup who caught one long TD — the
+    bottom-decile over-prediction failure mode in NOTES.md. Strictly
+    trailing: shift(1) within (player, season).
+    """
+    if snaps is None or not snaps.height:
+        return feat.with_columns([pl.lit(None, dtype=pl.Float64).alias(c)
+                                  for c in SNAP_FEATURES])
+    g = snaps.with_columns([
+        _trailing(["player_display_name"], "offense_pct", 3).alias("snap_pct_tr3"),
+        _s2d_rate(["player_display_name"], "offense_pct").alias("snap_pct_s2d"),
+    ]).select(["season", "week", "player_display_name", *SNAP_FEATURES])
+    return feat.join(g, on=["season", "week", "player_display_name"], how="left")
+
+
+def _attach_vacated(feat: pl.DataFrame,
+                    injuries: pl.DataFrame | None) -> pl.DataFrame:
+    """Pre-kickoff "vacated opportunity": trailing volume of the player's
+    same-position teammates designated Out/Doubtful in the official week-W
+    injury report (team-level targets/carries + count).
+
+    2026-11-17 audit A/B (V2/V3, clean 2025 holdout): V2 alone pooled rho
+    +0.0011; with snap share (V3) +0.0041 pooled and +0.0028 early-season,
+    14/16 stats non-negative. Elevates next-man-up starters the week after
+    RB1/WR1 is ruled out, instead of waiting 1-3 weeks of box scores.
+    No leakage: ``report_status[W]`` is the pre-game designation, and the
+    volume is the teammate's LAST AVAILABLE trailing value (backward asof
+    at or before week W — injured players often have no stats row in W).
+    """
+    if injuries is None or not injuries.height:
+        return feat.with_columns([pl.lit(None, dtype=pl.Float64).alias(c)
+                                  for c in VAC_FEATURES])
+    vol = (feat.select(["season", "week", "player_id",
+                        "targets_tr3", "carries_tr3"])
+           .unique().sort(["player_id", "season", "week"])
+           .with_columns(pl.col(["targets_tr3", "carries_tr3"])
+                         .cast(pl.Float64).fill_null(0.0)))
+    j = (injuries.rename({"gsis_id": "player_id"})
+         .sort(["player_id", "season", "week"])
+         .join_asof(vol, on="week", by=["player_id", "season"],
+                    strategy="backward"))
+    vac = (j.filter(pl.col("targets_tr3").is_not_null())
+           .group_by(["season", "week", "team", "position"], maintain_order=True)
+           .agg([pl.col("targets_tr3").sum().alias("vac_targets_tr3"),
+                 pl.col("carries_tr3").sum().alias("vac_carries_tr3"),
+                 pl.len().alias("n_vacated")]))
+    return feat.join(vac, on=["season", "week", "team", "position"], how="left")
+
+
+def per_session_shift(per_season: pl.DataFrame) -> pl.DataFrame:
+    """Tag season-S aggregates as the PRIOR-season features of season S+1,
+    keeping every aggregate column (regression: an earlier version's select
+    kept only the keys and dropped them all)."""
+    return per_season.with_columns(
+        (pl.col("season") + 1).cast(pl.Int32).alias("_season_next")) \
+        .drop("season").rename({"_season_next": "season"})
+
+
 def _prev_season_bridge(feat: pl.DataFrame, panel: pl.DataFrame) -> pl.DataFrame:
     """Prior-season per-game stats: the veteran bridge into Week 1-3.
 
@@ -290,8 +390,10 @@ def _prev_season_bridge(feat: pl.DataFrame, panel: pl.DataFrame) -> pl.DataFrame
                   .agg([pl.col(s).mean().alias(f"prev_season_{s}_pg")
                         for s in PREV_SEASON_STATS]
                        + [pl.len().alias("prev_season_games")]))
-    per_season = per_season.select(
-        ["player_id", (pl.col("season") + 1).cast(pl.Int32).alias("season")])
+    # Regression 2026-11-17: the original select here kept ONLY (player_id,
+    # season), silently dropping every bridge column — the "prior-season
+    # bridge" documented in NOTES.md was never actually in the model.
+    per_season = per_session_shift(per_season)
     return feat.join(per_season, on=["player_id", "season"], how="left")
 
 
@@ -300,14 +402,18 @@ def _prev_season_bridge(feat: pl.DataFrame, panel: pl.DataFrame) -> pl.DataFrame
 # --------------------------------------------------------------------------- #
 def build_features_from(panel: pl.DataFrame, team: pl.DataFrame,
                         ngs: dict[str, pl.DataFrame],
-                        usage: pl.DataFrame | None = None) -> pl.DataFrame:
+                        usage: pl.DataFrame | None = None,
+                        snaps: pl.DataFrame | None = None,
+                        injuries: pl.DataFrame | None = None) -> pl.DataFrame:
     """Build leakage-safe features from pre-loaded inputs.
 
     Split out from :func:`build_features` so tests can perturb ``panel`` and
     rebuild without re-reading every raw file. ``usage`` is the REG
     player_weekly_stats usage-share table (see :func:`load_usage`); the live
-    scheduled-panel path passes a dummy-row-augmented copy. If omitted, the
-    usage-share columns are all null (read as 0 by the models).
+    scheduled-panel path passes a dummy-row-augmented copy. ``snaps`` is the
+    NGS snap-share table (:func:`load_snap_counts`); ``injuries`` is the
+    Out/Doubtful designations (:func:`load_injury_reports`). Omitted tables
+    yield null feature columns (read as 0 by the models).
     """
     # Keep the scoring positions we model (QB/RB/WR/TE/K).
     feat = panel.filter(pl.col("position").is_in(sorted(RELEVANT_POSITIONS)))
@@ -315,6 +421,8 @@ def build_features_from(panel: pl.DataFrame, team: pl.DataFrame,
     feat = _attach_team_and_opp(feat, team)
     feat = _attach_nextgen(feat, ngs)
     feat = _attach_usage_shares(feat, usage)
+    feat = _attach_snap_shares(feat, snaps)
+    feat = _attach_vacated(feat, injuries)
     feat = _prev_season_bridge(feat, panel)
     return feat
 
@@ -324,7 +432,10 @@ def build_features(raw_dir: pathlib.Path = RAW_DIR) -> pl.DataFrame:
     team = load_team_stats(raw_dir)
     ngs = load_nextgen(raw_dir)
     usage = load_usage(raw_dir)
-    return build_features_from(panel, team, ngs, usage)
+    snaps = load_snap_counts(raw_dir)
+    injuries = load_injury_reports(raw_dir)
+    return build_features_from(panel, team, ngs, usage,
+                               snaps=snaps, injuries=injuries)
 
 
 def main() -> None:

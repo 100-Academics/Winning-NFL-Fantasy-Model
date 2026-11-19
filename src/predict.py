@@ -197,7 +197,14 @@ def _phrase(pos: str, preds: dict, bands: dict) -> str:
         s = f"{_fmt_num(val, target)} {label}"
         if target in bands:
             lo, hi = bands[target]
-            s += f" ({_fmt_num(lo, target)}-{_fmt_num(hi, target)})"
+            if target.endswith("tds") and hi < val:
+                # Degenerate quantile band (p90 below the fitted mean, e.g.
+                # "(0.0-1.0)" on sparse TD stats): show the analytic Poisson
+                # P(TD>=1) = 1 - exp(-mu) instead. Output surface only.
+                p = 1.0 - float(np.exp(-max(val, 0.0)))
+                s += f" (P(TD>=1) {100.0 * p:.0f}%)"
+            else:
+                s += f" ({_fmt_num(lo, target)}-{_fmt_num(hi, target)})"
         parts.append(s)
     # join with commas, last with "and"
     if not parts:

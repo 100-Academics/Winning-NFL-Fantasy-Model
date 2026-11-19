@@ -150,6 +150,18 @@ def download(ds: Dataset, seasons: list[int], raw_dir: Path, force: bool) -> boo
           flush=True)
     t0 = time.time()
     df = _call_loader(ds, seasons)
+    if ds.name in _TAKES_SEASONS and _is_done(path):
+        # Merge, don't clobber: a partial re-pull (predict.py --refresh pulls
+        # only the last 2 seasons) must not wipe the historical seasons already
+        # on disk. Replace exactly the seasons we just pulled, keep the rest.
+        try:
+            existing = pl.read_parquet(path)
+            if "season" in existing.columns:
+                kept = existing.filter(
+                    ~pl.col("season").cast(pl.Int64).is_in(seasons))
+                df = pl.concat([kept, df], how="diagonal_relaxed")
+        except Exception:
+            pass  # unreadable existing file: overwrite as before
     _write_parquet(df, path)
     print(f"        {df.shape[0]:>9,} rows x {df.shape[1]:>3} cols  "
           f"({time.time() - t0:6.1f}s, {path.stat().st_size / 1e6:7.2f} MB)", flush=True)

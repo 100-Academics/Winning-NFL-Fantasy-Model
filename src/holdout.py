@@ -234,11 +234,30 @@ def _build_scheduled_panel(season: int, week: int) -> pl.DataFrame:
     usage = _add_dummy(usage, "player_id", F.USAGE_COLS)
 
     # --- run through the SAME feature pipeline (adds trailing team/opp/NGS/usage)
-    feat = F.build_features_from(panel, teams, ngs, usage)
+    feat = F.build_features_from(panel, teams, ngs, usage,
+                                 snaps=F.load_snap_counts(RAW_DIR),
+                                 injuries=F.load_injury_reports(RAW_DIR))
 
     # --- keep only the target-week rows
     out = feat.filter(pl.col("week") == week)
     return out
+
+
+def _target_week_fully_played(sched: pl.DataFrame) -> bool:
+    """True when EVERY scheduled game of the (season, week) has a final score.
+
+    Used by ``predict_week`` to decide between the two feature sources:
+    fully-played weeks have their real feature rows in features.parquet (the
+    replay path); unplayed or PARTIALLY-played weeks must use the scheduled
+    panel, whose trailing features are strictly prior-week. The old guard
+    (`rows.height == 0`) silently kept a partial week's played-game rows and
+    skipped the rest of the slate — the W8 Thursday-game edge case.
+    """
+    if sched.height == 0:
+        return False
+    finished = sched.filter(pl.col("home_score").is_not_null()
+                            & pl.col("away_score").is_not_null())
+    return finished.height == sched.height
 
 
 def predict_week(season: int, week: int) -> list[dict]:
@@ -253,10 +272,15 @@ def predict_week(season: int, week: int) -> list[dict]:
     feat_cols = payload["meta"]["feature_columns"]
     models = payload["models"]
 
-    # Try the existing (played) features first.
+    # Try the existing (played) features first — but ONLY for a fully-played
+    # week. For unplayed or partially-played weeks (a Thursday game already in
+    # features.parquet while the weekend slate is not), the scheduled panel is
+    # the leakage-safe full-slate source.
     feat = _load_features()
     rows = feat.filter((pl.col("season") == season) & (pl.col("week") == week))
-    if rows.height == 0:
+    sched_w = pl.read_parquet(RAW_DIR / "schedules.parquet").filter(
+        (pl.col("season") == season) & (pl.col("week") == week))
+    if rows.height == 0 or not _target_week_fully_played(sched_w):
         # Upcoming week: build a scheduled panel from roster + schedule + the
         # existing trailing features, then select the model's feature columns.
         rows = _build_scheduled_panel(season, week)
