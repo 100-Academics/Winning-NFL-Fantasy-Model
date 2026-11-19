@@ -233,9 +233,41 @@ def _build_scheduled_panel(season: int, week: int) -> pl.DataFrame:
              .unique(subset=["season", "week", "player_id"]))
     usage = _add_dummy(usage, "player_id", F.USAGE_COLS)
 
+    # --- snap shares: played weeks + dummy target row. snap_counts.parquet has
+    #     NO row for the unplayed target week, so without a dummy the
+    #     (season, week, name) left-join in _attach_snap_shares nulls out
+    #     snap_pct_tr3/s2d for EVERYONE on the live board (read as 0.0) — the
+    #     exact bug NGS hit on W4 (Mahomes 272 -> 44). Add a dummy row at the
+    #     target week per player (a copy of the last-played offense_pct, shifted
+    #     OUT of the trailing window) so snap_pct_tr3/s2d at the target week =
+    #     the mean of the played weeks — exactly what the played-week path
+    #     produces. (Filtered to the target season first, like the NGS path, so
+    #     _add_dummy's last-played pick is unambiguous.)
+    snaps = F.load_snap_counts(RAW_DIR)
+    if snaps.height:
+        snaps = snaps.filter(pl.col("season") == season)
+        snaps = _add_dummy(snaps, "player_display_name", ["offense_pct"])
+
+    # --- prior-season rows (for the _prev_season_bridge feature): the bridge
+    #     aggregates the panel per season and tags season S as the PRIOR-season
+    #     features of S+1. The live panel above has ONLY the current season's
+    #     rows, so the bridge found no prior-season rows and all 7 prev_season_*
+    #     columns silently became 0.0 on the live board (the same class of bug
+    #     NGS/snap hits). Add the prior season's full player rows: they live in
+    #     their own (player_id, season) window partition, so they add no
+    #     lookahead to the current season's features — they only feed the
+    #     bridge. (Rookies have no prior-season rows -> null -> 0, as intended.)
+    prior = (pw.filter((pl.col("season") == season - 1)
+                       & pl.col("position").is_in(pos4))
+             .select(["season", "week", "player_id", "player_display_name",
+                      "position", "position_group", "team", "opponent_team", "game_id"]
+                     + TARGETS))
+    if prior.height:
+        panel = pl.concat([panel, prior], how="diagonal")
+
     # --- run through the SAME feature pipeline (adds trailing team/opp/NGS/usage)
     feat = F.build_features_from(panel, teams, ngs, usage,
-                                 snaps=F.load_snap_counts(RAW_DIR),
+                                 snaps=snaps,
                                  injuries=F.load_injury_reports(RAW_DIR))
 
     # --- keep only the target-week rows
@@ -415,14 +447,23 @@ def score_week(season: int, week: int) -> dict:
     agg: dict[str, list[float]] = {"model": [], "actual": [],
                                    "last_game": [], "trailing3": []}
     n_scored = 0
+    n_zeroed = 0
     for (season_, week_, pid), e in entries.items():
-        a = actual_by.get((season_, week_, pid))
-        if a is None:
-            continue
         pos = e["position"]
         targets = POS_TARGETS.get(pos, [])
         if not targets:
             continue
+        a = actual_by.get((season_, week_, pid))
+        if a is None:
+            # 2026-11-19 audit (B5): a logged player with NO actual row was
+            # silently dropped here, which biased the score toward players who
+            # posted stat lines (by definition above zero). Score them as
+            # actual = 0.0 points instead — an active player who posts 0 still
+            # costs a lineup slot, and a pre-kickoff Out player we projected is
+            # a real miss, not a non-game. (Distinguishing "benched Out" from
+            # "active 0" at LOG time is a separate logging-side refinement.)
+            a = {}
+            n_zeroed += 1
 
         # --- actual PPR ---
         actual_pts = sum(SCORE.get(s, 0.0) * float(a.get(s) or 0.0) for s in targets)
@@ -445,6 +486,7 @@ def score_week(season: int, week: int) -> dict:
     out = {
         "season": season, "week": week, "scoring": SCORING_LABEL,
         "n_logged": len(entries), "n_scored": n_scored,
+        "n_zeroed": n_zeroed,
         "logged_at": e.get("logged_at"),
         "note": ("clean holdout: prediction logged pre-kickoff (or replayed "
                  "for an already-played week from the frozen pre-2026 model); "

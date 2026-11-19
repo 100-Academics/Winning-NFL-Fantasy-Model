@@ -14,9 +14,11 @@ Run:  uv run python -m src.compare_fantasypros
 """
 from __future__ import annotations
 
+import argparse
 import json
 import pathlib
 import re
+import sys
 
 import joblib
 import numpy as np
@@ -32,8 +34,11 @@ FP_DIR = REPO_ROOT / "data" / "processed" / "fantasypros"
 
 # FantasyPros stat key -> our stat column name (per-position).
 STAT_MAP = {
+    # QB rushing was omitted here even though FP projects it and we model it
+    # (QB POS_TARGETS includes rushing_yards/rushing_tds) — 2026-11-19 audit.
     "QB": {"pass_yds": "passing_yards", "pass_tds": "passing_tds",
-           "pass_ints": "passing_interceptions"},
+           "pass_ints": "passing_interceptions",
+           "rush_yds": "rushing_yards", "rush_tds": "rushing_tds"},
     "RB": {"rush_yds": "rushing_yards", "rush_tds": "rushing_tds",
            "rec_rec": "receptions", "rec_yds": "receiving_yards",
            "rec_tds": "receiving_tds"},
@@ -86,20 +91,41 @@ def _load_fp_board(season: int, week: int, pos: str) -> dict | None:
     return out
 
 
-def main() -> None:
+def _season_weeks(season: int) -> list[int]:
+    """Complete (all-positions) FP weeks cached for ``season``."""
+    weeks = sorted({int(re.match(rf"{season}_w(\d+)_", p.name).group(1))
+                    for p in FP_DIR.glob(f"{season}_w*_*.json")})
+    return [w for w in weeks
+            if all((FP_DIR / f"{season}_w{w:02d}_{pos}.json").exists()
+                   for pos in POS_TARGETS)]
+
+
+def _detect_season() -> int:
+    """Most recent season with >=1 complete FP board (was hardcoded to 2024)."""
+    seasons = {int(re.match(r"(\d{4})_w", p.name).group(1))
+               for p in FP_DIR.glob("*_w*_*.json")}
+    for s in sorted(seasons, reverse=True):
+        if _season_weeks(s):
+            return s
+    raise SystemExit(f"no complete FantasyPros boards found in {FP_DIR}")
+
+
+def main(argv: list[str] | None = None) -> int:
+    ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument("--season", type=int, default=None,
+                    help="FP board season to compare (default: most recent "
+                         "season with complete boards in data/processed/fantasypros)")
+    args = ap.parse_args(argv)
+    season = args.season or _detect_season()
+
     payload = joblib.load(MODELS_DIR / "models.joblib")
     feat_cols = payload["meta"]["feature_columns"]
     models = payload["models"]
 
     feat = (pl.read_parquet(PROCESSED_DIR / "features.parquet")
-            .filter(pl.col("season") == 2024))
-    # Determine which (week,pos) boards exist and are complete.
-    weeks = sorted({int(re.match(r"2024_w(\d+)_", p.name).group(1))
-                    for p in FP_DIR.glob("2024_w*_*.json")})
-    complete = [w for w in weeks
-                if all((FP_DIR / f"2024_w{w:02d}_{pos}.json").exists()
-                       for pos in POS_TARGETS)]
-    print(f"Using complete 2024 weeks: {complete}\n")
+            .filter(pl.col("season") == season))
+    complete = _season_weeks(season)
+    print(f"Using complete {season} weeks: {complete}\n")
     # Per (week, position): load feature rows once, index by normalized name.
     rows_by_wkpos: dict[tuple[int, str], dict[str, dict]] = {}
     for pos in POS_TARGETS:
@@ -116,7 +142,7 @@ def main() -> None:
         smap = STAT_MAP[pos]
         rows = rows_by_wkpos.get
         for w in complete:
-            board = _load_fp_board(2024, w, pos)
+            board = _load_fp_board(season, w, pos)
             if not board:
                 continue
             rows_for_wk = rows((w, pos))
@@ -173,8 +199,8 @@ def main() -> None:
           f" {sf['mae']:>6.2f}/{sf['rmse']:<4.1f}"
           f" {so['spearman']:>9.3f}{sf['spearman']:>8.3f}")
 
-    # Points-level (standard 1-PPR) readout per position.
-    print(f"\nESPN Standard weekly points (2024 test, head-to-head):")
+    # Points-level (ESPN Standard) readout per position.
+    print(f"\nESPN Standard weekly points ({season}, head-to-head):")
     print(f"{'pos':<3}{'n':>5}  {'OURS pts':>12}{'FANTASYPROS':>14}{'rho ours':>9}{'rho FP':>8}")
     print("-" * 78)
     for pos in POS_TARGETS:
@@ -198,12 +224,13 @@ def main() -> None:
               f" {sf['mae']:>6.2f}/{sf['rmse']:<4.1f}"
               f" {so['spearman']:>9.3f}{sf['spearman']:>8.3f}")
 
-    out = {"season": 2024, "weeks": complete, "n_rows": n_rows,
+    out = {"season": season, "weeks": complete, "n_rows": n_rows,
           "stat_level": detail, "note": "head-to-head on FP free-tier top-10/pos "
           "board; both sides project the same raw stat components"}
     (MODELS_DIR / "fantasypros_report.json").write_text(json.dumps(out, indent=2))
     print(f"\n-> {MODELS_DIR / 'fantasypros_report.json'}")
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main(sys.argv[1:]))

@@ -323,6 +323,14 @@ def _attach_snap_shares(feat: pl.DataFrame,
     if snaps is None or not snaps.height:
         return feat.with_columns([pl.lit(None, dtype=pl.Float64).alias(c)
                                   for c in SNAP_FEATURES])
+    # WINDOW ORDER MUST BE WEEK-SORTED within (player, season): polars `.over()`
+    # follows PHYSICAL row order, and load_snap_counts ends with
+    # `.sort(...).unique(subset=...)` — in polars 1.44 `unique()` SCRAMBLES the
+    # sort (verified: rows come back hash-ordered, e.g. a veteran's weeks appear
+    # as (2021,14),(2018,4),(2018,16)...). Without this re-sort the "trailing"
+    # tr3/s2d window over arbitrary rows, not the prior weeks. Same fix as
+    # _ngs_trailing, which sorts before its trailing for exactly this reason.
+    snaps = snaps.sort(["player_display_name", "season", "week"])
     g = snaps.with_columns([
         _trailing(["player_display_name"], "offense_pct", 3).alias("snap_pct_tr3"),
         _s2d_rate(["player_display_name"], "offense_pct").alias("snap_pct_s2d"),

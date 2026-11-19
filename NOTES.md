@@ -527,6 +527,101 @@ has been replaced. Diagnosis + fix, A/B'd so we don't redo it:
 - Data refresh: 10/11 datasets updated; only the expected `participation`
   [FAIL] (nflreadpy season range caps at 2025) — the 2026-09-29 file stays.
 
+## Third-party audit #3 — live-path correctness fixes + NaN A/B (2026-11-19)
+
+A third-party LLM audited the model again (pasted as-is; focused on "two silent
+bugs in the live prediction path" + a NaN-handling claim + feature upgrades +
+external benchmarks). Every testable claim verified against the code; every
+model-affecting change A/B'd on the clean 2025 holdout before adoption (standing
+rule). This audit's highest-impact items were correctness bugs in the **live
+(upcoming-week) path** — features that were silently `0.0` on the board.
+
+### Claim verification (audit claim → verdict)
+
+1. **`snap_pct_tr3/s2d` silently `0.0` on live upcoming weeks** (`holdout.py:238`
+   passed raw `load_snap_counts`; `_attach_snap_shares` left-joins on
+   (season,week,name) → null at the unplayed week → `fill_null(0.0)`) —
+   **TRUE.** Same class of bug as the NGS W4 collapse (Mahomes 272→44). **Fixed.**
+2. **`prev_season_*` bridge features silently `0.0` on live upcoming weeks**
+   (`holdout.py:167` filtered the panel to the current season only, so
+   `_prev_season_bridge` found no prior-season rows) — **TRUE.** **Fixed.**
+3. **`.fill_null(0.0)` before HGBR** (dome→0°F, missing NGS→0% separation,
+   week-1→0-yard game; HGBR handles NaN natively) — **TRUE as a representation
+   choice.** A/B'd below: within noise on ρ → **not adopted** (kept zero-fill).
+4. **`a is None: continue` at `holdout.py:420` drops logged players with no
+   actual row** (an active-but-zero player scored as a non-game) — **TRUE.**
+   **Fixed** (scored as actual=0.0, `n_zeroed` reported).
+5. **`compare_fantasypros.py` hardcoded to 2024; QB `STAT_MAP` missing
+   `rush_yds`/`rush_tds`** — **TRUE.** **Fixed** (season generalization + QB
+   rushing added).
+6. **OUR FIND (not in the audit): `snap_pct_*` trailing was computed over a
+   SCRAMBLED physical row order.** `load_snap_counts` ends with
+   `.sort(...).unique(subset=...)`, and in polars 1.44 `unique()` returns
+   hash-ordered rows, so the `.over()` trailing windowed over arbitrary rows
+   (not the prior weeks) — the exact "`.over()` follows PHYSICAL ROW ORDER"
+   gotcha already noted in this file. Verified (Rodgers rows at physical idx
+   379/606/664/1203). **Fixed** (re-sort on (name, season, week) before the
+   trailing, same pattern as `_ngs_trailing`). This changes the played-week
+   (training) features → A/B'd below.
+
+### A/B (clean 2025 holdout; train 2016–23 / val 2024 / test 2025, shipped 24-config grid)
+
+`notebooks/_ab_snapfix_nan.py` → `models/ab_snapfix_nan_report.json`. Three arms,
+same test rows; cross-position all-null NGS cols dropped per-position (asserted
+empty in test → a no-op for the zero-fill arms):
+
+| arm | change | pooled MAE | pooled ρ | MAE wins vs V0 | verdict |
+| --- | --- | --- | --- | --- | --- |
+| V0 | old (scrambled) snap + zero-fill (= shipped) | 6.87 | 0.7347 | — | — |
+| V1 | **corrected** snap order + zero-fill | 6.88 | 0.7338 | 6/16 | **applied** (correctness) |
+| V2 | corrected snap order + **NaN** | 6.82 | 0.7383 | 12/16 | within noise (ρ) → not adopted |
+
+(Per-stat win counts are run-to-run unstable — HGBR threading variance on
+deltas this small flips individual stats across the zero line; the pooled
+MAE/ρ are stable. Re-run gives V2 8–12/16 MAE wins, Δρ +0.002–0.004 either way.)
+
+- **snap-order (V0→V1):** within noise on metrics (MAE −0.02, ρ −0.0025) but a
+  genuine correctness bug (the trailing windowed over scrambled rows) → **adopted**
+  on correctness; the retrain matches V1 almost exactly (QB pass_yds 53.8/ρ+0.617,
+  RB rush 16.7/ρ+0.795, WR rec 18.1/ρ+0.716, TE rec 12.8/ρ+0.702; 12/16 beat
+  baseline — unchanged).
+- **NaN (V0→V2):** best arm (pooled MAE −0.08, ρ +0.002, 8/16 MAE wins) and more
+  correct, but Δρ +0.002 is inside the ±0.01 noise bar → **not adopted** by
+  default (kept the simpler zero-fill). Available if desired — would require the
+  per-position all-null column drop in `src/model.py`.
+
+### Shipped changes (all correctness; A/B-gated where model-affecting)
+
+- `src/holdout.py` — `_build_scheduled_panel`: B1 (snap dummy row at the target
+  week, mirroring the NGS W4 fix) + B2 (prior-season rows added so the bridge
+  fires on the live path). Verified exact on the W12 panel: `snap_pct_tr3` 514
+  non-zero, all 7 `prev_season_*` populated, Rodgers cross-checks exact
+  (0.9233, 204.0).
+- `src/features.py` — `_attach_snap_shares`: re-sort on (name, season, week)
+  before the trailing (scrambled-order fix).
+- `src/holdout.py` — `score_week`: logged players with no actual row now score
+  as actual=0.0 (`n_zeroed` reported) instead of being silently dropped.
+- `src/compare_fantasypros.py` — QB `STAT_MAP` + `rush_yds`/`rush_tds`; season
+  generalization (`--season` / auto-detect) instead of hardcoded 2024.
+- Model retrained (corrected snap + zero-fill): 2025 test **12/16 beat
+  baseline** (unchanged from the shipped V6 model), ranking strong on the
+  decision stats. W11's logged projections stand as logged (pre-audit model);
+  this governs W12 onward.
+- `features.parquet` rebuilt (snap-order fix changes played-week features).
+
+### NOT applied (A/B within noise — do not re-test without a new signal)
+
+- Keep-NaN before HGBR (audit claim 3): best arm but Δρ +0.002 < ±0.01 noise bar;
+  more correct. If adopted, drop the per-position all-null NGS cols in training.
+
+### Not yet built (audit's feature upgrades + external benchmarks — proposed follow-ups)
+
+- Own-player injury status + QB-out flag; red-zone / inside-the-10 usage
+  (nflverse PBP); position-specific defense allowed; two-stage volume→production
+  + per-position feature pruning; refit on train+val + de-dup band fits.
+- External benchmarks: Vegas player props, full-slate ESPN + FantasyPros logging,
+  FantasyPros "Accuracy Gap" protocol, FFA 11-season MAE/R² reference.
+
 ## Third-party audit — claim verification + A/B + fixes (2026-11-17)
 
 A third-party LLM audited the model (claims about current performance, four

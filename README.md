@@ -15,6 +15,32 @@ converts these components — this repo does not score them.
 - Produces per-player per-week projections of individual stat components,
   with uncertainty (p10–p90) bands.
 
+## Results
+
+**The product — a full-roster weekly board.** Every week the model projects
+all active players' stat components, converts them to ESPN Standard (non-PPR)
+points, and ranks them. This is the live **Week 11, 2026 board** — top-10 per
+offensive position plus the D/ST matchup board for all 26 teams — with the
+most recently scored weeks recap'd at the top.
+
+![Week 11, 2026 board](docs/week11_board.png)
+
+**Held-out accuracy.** On the clean 2025 holdout (the model was never fit on
+2025), **12 of 16** position-stat models beat *both* naive baselines
+(last-game and trailing-3 average) on MAE. The edge is largest on headline
+yardage — e.g. QB passing yards MAE **53.8** vs 81.0 / 75.5 for the baselines
+— and the model's Spearman ranking is positive on all 16.
+
+![2025 holdout — model vs naive baselines](docs/mae_vs_baselines.png)
+
+**The live season is the only clean test.** 2026 predictions are written to
+disk *before* kickoff and scored after the games — never re-fit on a week you
+are about to score. The model takes the ranking (Spearman) win on **every**
+scored week, ahead of trailing-3 and last-game each time (W1: 0.672 → W10:
+0.701).
+
+![2026 live holdout progression](docs/holdout_2026.png)
+
 ## Status
 
 - **Phase 1** setup, **Phase 2** data acquisition, **Phase 3** cleaning +
@@ -55,17 +81,19 @@ uv run python -m src.model      # trains + evaluates, writes models/
 uv run python -m src.model --quick   # fast smoke test
 ```
 
-- Split is **chronological**: train 2016–2022 | val 2023 | test 2024–2025.
+- Split is **chronological**: train 2016–2023 | val 2024 | test 2025.
+  (2024 was folded into training after we over-diagnosed on it; 2026 is the
+  live pre-kickoff holdout via `src.holdout`.)
 - Model: `HistGradientBoostingRegressor` per (position, stat). The **central
   estimate fits the conditional MEAN** (`loss="squared_error"`) — a median
   (quantile-0.5) systematically under-projects these right-skewed, zero-inflated
   stats (measured: RB/WR/TE 30–40% low, TDs collapsed to 0) and breaks the
   linearity needed for cross-position (flex) ranking. **p10/p90 bands** stay
   quantile models. Compared against naive baselines (last game, trailing
-  3-game average): **10/14 position-stats beat both on test MAE** — the 4 that
+  3-game average): **12/16 position-stats beat both on test MAE** — the 4 that
   don't are the ultra-sparse TD/INT counts where "last week was 0" is a strong
-  null. Headline yardage stats win clearly, e.g. QB passing yards MAE 55.0 vs
-  74.8 baseline.
+  null. Headline yardage stats win clearly, e.g. QB passing yards MAE 53.8 vs
+  81.0 / 75.5 baseline.
 - Artifacts: `models/models.joblib` (models + p10/p90 band models + metadata)
   and `models/eval_report.json`. Calibration/signed-bias:
   `uv run python -m src.calibrate` → `models/calibration_report.json`.
