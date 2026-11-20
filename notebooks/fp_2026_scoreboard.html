@@ -1,0 +1,70 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>2026 live head-to-head vs FantasyPros</title>
+<style>
+  :root { --accent:#38bdf8; }
+  * { box-sizing:border-box; }
+  body { font-family: var(--font, system-ui, sans-serif); color: var(--foreground);
+         margin:0; padding:14px 2px; }
+  h1 { font-size:17px; margin:0 0 2px; }
+  .sub-h { color: var(--muted-foreground); font-size:12.5px; margin:0 0 12px; }
+  .headline { background: var(--card); border:1px solid var(--border);
+               border-left:3px solid var(--accent); border-radius:8px;
+               padding:9px 12px; font-size:13.5px; margin-bottom:14px; }
+  .headline b { color: var(--accent); }
+  .cards { display:flex; gap:8px; flex-wrap:wrap; margin-bottom:16px; }
+  .card { flex:1 1 120px; min-width:118px; background:var(--card);
+           border:1px solid var(--border); border-radius:8px; padding:8px 10px; }
+  .card-lbl { font-size:11px; color:var(--muted-foreground); text-transform:uppercase; letter-spacing:.04em; }
+  .card-val { font-size:20px; font-weight:700; margin-top:2px; }
+  .card-fp { font-size:11.5px; color:var(--muted-foreground); }
+  .card-tally { font-size:11px; margin-top:3px; }
+  table { border-collapse:collapse; width:100%; font-size:12.5px; }
+  th,td { text-align:right; padding:5px 7px; border-bottom:1px solid var(--border); white-space:nowrap; }
+  th.posname, td.lbl { text-align:left; font-weight:600; }
+  thead th { color:var(--muted-foreground); font-size:11px; text-transform:uppercase; letter-spacing:.03em; }
+  .posrow.strong th.posname { color:var(--accent); }
+  .sub { color:var(--muted-foreground); font-size:11px; }
+  .n { color:var(--muted-foreground); font-size:11px; }
+  .badge { font-size:10px; font-weight:700; padding:1px 6px; border-radius:10px; letter-spacing:.03em; }
+  .badge.win { background:color-mix(in srgb, var(--accent) 22%, transparent); color:var(--accent); }
+  .badge.lose { background:color-mix(in srgb, var(--muted-foreground) 22%, transparent); color:var(--muted-foreground); }
+  .ours { color:var(--accent); font-weight:600; }
+  h2 { font-size:13px; margin:16px 0 6px; }
+  .wk { display:grid; grid-template-columns:34px 1fr 1fr 46px; gap:6px; align-items:center; margin:4px 0; }
+  .wk-lbl { font-size:11px; color:var(--muted-foreground); }
+  .bars { display:flex; align-items:center; gap:6px; }
+  .bar { height:9px; border-radius:5px; }
+  .bar.ours { background:var(--accent); }
+  .bar.fp { background:var(--muted-foreground); }
+  .bar-val { font-size:11px; }
+  .wk-win { text-align:right; }
+  .note { background:var(--card); border:1px solid var(--border); border-radius:8px;
+           padding:9px 12px; font-size:11.5px; color:var(--muted-foreground); margin-top:14px; line-height:1.5; }
+  .legend { font-size:11px; color:var(--muted-foreground); margin:4px 0 8px; }
+  .legend .ours, .legend .fp { font-weight:600; }
+</style></head><body>
+  <h1>2026 live head-to-head — our model vs the FantasyPros consensus</h1>
+  <p class="sub-h">Scored live weeks w1, w2, w3, w4, w5, w7, w8, w9, w10 (the only true OOS for the shipped model) · ESPN Standard (non-PPR) · n=358 player-weeks</p>
+  <div class="headline">We beat the consensus on the live 2026 weeks: pooled points <b>MAE 6.05 vs 6.22</b>,
+  <b>Spearman +0.534 vs +0.512</b>, winning <b>3 of 4 positions</b> on points MAE/RMSE/Spearman.
+  Modest but real — the edge is on signal/quality, not a blowout. WR is the one position we trail.</div>
+
+  <div class="cards"><div class="card win"><div class="card-lbl">pts MAE</div><div class="card-val">6.05</div><div class="card-fp">FP 6.22</div><div class="card-tally">3/4 positions</div><span class="badge win">WIN</span></div><div class="card win"><div class="card-lbl">pts RMSE</div><div class="card-val">7.57</div><div class="card-fp">FP 7.61</div><div class="card-tally">3/4 positions</div><span class="badge win">WIN</span></div><div class="card win"><div class="card-lbl">Spearman</div><div class="card-val">+0.534</div><div class="card-fp">FP +0.512</div><div class="card-tally">3/4 positions</div><span class="badge win">WIN</span></div><div class="card win"><div class="card-lbl">top5 decision</div><div class="card-val">3/4</div><div class="card-fp">FP 1/4</div><div class="card-tally">3/4 positions</div><span class="badge win">WIN</span></div></div>
+
+  <h2>By position</h2>
+  <div class="legend"><span class="ours">ours</span> &nbsp;<span class="fp">vs FP</span> &nbsp;· rawMAE = apples-to-apples stat components · ptsRho = weekly points Spearman · top5act = mean actual of each side's weekly top-5 pick</div>
+  <table>
+    <thead><tr><th>pos</th><th>raw-stat MAE</th><th>pts MAE</th><th>pts Spearman</th><th>top5 mean actual</th><th>n</th></tr></thead>
+    <tbody><tr class="posrow strong"><th class="posname">QB</th><td>14.53 <span class="sub">vs 14.97</span> <span class="badge win">WIN</span></td><td>5.98 <span class="sub">vs 6.37</span> <span class="badge win">WIN</span></td><td>+0.448 <span class="sub">vs +0.369</span> <span class="badge win">WIN</span></td><td>20.24 <span class="sub">vs 20.42</span> <span class="badge lose">trail</span></td><td class="n">90</td></tr><tr class="posrow strong"><th class="posname">RB</th><td>10.14 <span class="sub">vs 10.05</span> <span class="badge lose">trail</span></td><td>6.66 <span class="sub">vs 6.98</span> <span class="badge win">WIN</span></td><td>+0.300 <span class="sub">vs +0.297</span> <span class="badge win">WIN</span></td><td>18.73 <span class="sub">vs 18.62</span> <span class="badge win">WIN</span></td><td class="n">89</td></tr><tr class="posrow weak"><th class="posname">WR</th><td>14.88 <span class="sub">vs 14.60</span> <span class="badge lose">trail</span></td><td>6.96 <span class="sub">vs 6.71</span> <span class="badge lose">trail</span></td><td>+0.116 <span class="sub">vs +0.139</span> <span class="badge lose">trail</span></td><td>14.43 <span class="sub">vs 14.13</span> <span class="badge win">WIN</span></td><td class="n">89</td></tr><tr class="posrow strong"><th class="posname">TE</th><td>8.12 <span class="sub">vs 9.03</span> <span class="badge win">WIN</span></td><td>4.63 <span class="sub">vs 4.85</span> <span class="badge win">WIN</span></td><td>+0.321 <span class="sub">vs +0.206</span> <span class="badge win">WIN</span></td><td>9.16 <span class="sub">vs 8.62</span> <span class="badge win">WIN</span></td><td class="n">90</td></tr></tbody>
+  </table>
+
+  <h2>Weekly trend — points Spearman (ours vs FP)</h2>
+  <div class="wk"><div class="wk-lbl">w01</div><div class="bars"><div class="bar ours" style="width:58%"></div><span class="bar-val">+0.469</span></div><div class="bars"><div class="bar fp" style="width:48%"></div><span class="bar-val">+0.392</span></div><div class="wk-win"><span class="badge win">WIN</span></div></div><div class="wk"><div class="wk-lbl">w02</div><div class="bars"><div class="bar ours" style="width:43%"></div><span class="bar-val">+0.348</span></div><div class="bars"><div class="bar fp" style="width:46%"></div><span class="bar-val">+0.371</span></div><div class="wk-win"><span class="badge lose">trail</span></div></div><div class="wk"><div class="wk-lbl">w03</div><div class="bars"><div class="bar ours" style="width:73%"></div><span class="bar-val">+0.593</span></div><div class="bars"><div class="bar fp" style="width:69%"></div><span class="bar-val">+0.560</span></div><div class="wk-win"><span class="badge win">WIN</span></div></div><div class="wk"><div class="wk-lbl">w04</div><div class="bars"><div class="bar ours" style="width:67%"></div><span class="bar-val">+0.540</span></div><div class="bars"><div class="bar fp" style="width:62%"></div><span class="bar-val">+0.502</span></div><div class="wk-win"><span class="badge win">WIN</span></div></div><div class="wk"><div class="wk-lbl">w05</div><div class="bars"><div class="bar ours" style="width:71%"></div><span class="bar-val">+0.573</span></div><div class="bars"><div class="bar fp" style="width:74%"></div><span class="bar-val">+0.602</span></div><div class="wk-win"><span class="badge lose">trail</span></div></div><div class="wk"><div class="wk-lbl">w07</div><div class="bars"><div class="bar ours" style="width:64%"></div><span class="bar-val">+0.523</span></div><div class="bars"><div class="bar fp" style="width:64%"></div><span class="bar-val">+0.518</span></div><div class="wk-win"><span class="badge win">WIN</span></div></div><div class="wk"><div class="wk-lbl">w08</div><div class="bars"><div class="bar ours" style="width:56%"></div><span class="bar-val">+0.451</span></div><div class="bars"><div class="bar fp" style="width:54%"></div><span class="bar-val">+0.438</span></div><div class="wk-win"><span class="badge win">WIN</span></div></div><div class="wk"><div class="wk-lbl">w09</div><div class="bars"><div class="bar ours" style="width:58%"></div><span class="bar-val">+0.469</span></div><div class="bars"><div class="bar fp" style="width:59%"></div><span class="bar-val">+0.482</span></div><div class="wk-win"><span class="badge lose">trail</span></div></div><div class="wk"><div class="wk-lbl">w10</div><div class="bars"><div class="bar ours" style="width:100%"></div><span class="bar-val">+0.811</span></div><div class="bars"><div class="bar fp" style="width:85%"></div><span class="bar-val">+0.691</span></div><div class="wk-win"><span class="badge win">WIN</span></div></div>
+
+  <div class="note"><b>Method:</b> apples-to-apples on the FantasyPros free-tier top-10/position board,
+  compared against our logged pre-kickoff predictions (the clean live record) on the overlapping players;
+  actuals from <code>features.parquet</code>. Both sides are pre-week commitments.
+  <b>Caveats:</b> the FP free tier caps at top-10/position, so this is a top-10 head-to-head, not a full-roster
+  one; single weeks are noisy (we win 6 of 9 on MAE, 6 of 9 on Spearman); WR is the one position where we trail
+  on every metric, and QB top-5 is a near-tie. Repro: <code>uv run python notebooks/_fp_2026_scoreboard.py</code>.</div>
+</body></html>

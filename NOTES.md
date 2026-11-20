@@ -771,8 +771,44 @@ only 6 full scored weeks + one partial — per-game win rates are noisy, and the
 +10–14% live skill-position over-projection is the thing to track. **Nothing to change**:
 the standing rule governs model changes and nothing here calls for one. **NOT tested:**
 full 2025 season on the current model (in-sample — not a valid OOS for it);
-FantasyPros head-to-head on live 2026 weeks (FP API archives cover 2024/25; live-2026
-fetch not attempted).
+FantasyPros head-to-head on live 2026 weeks — **now closed (2026-11-19), see the
+dedicated "Live 2026 head-to-head vs FantasyPros" section below.**
+
+## Live 2026 head-to-head vs FantasyPros — the "is it good" gap, closed (2026-11-19)
+
+The "Is it good?" battery (2026-11-01) flagged one untested item: "FantasyPros
+head-to-head on live 2026 weeks … not attempted." Closed it. The FP public API
+now archives 2026 weeks (top-10/position, free tier), so we ran the apples-to-
+apples head-to-head on the SCORED live 2026 weeks (w1–w5, w7–w10 — the only
+true OOS for the shipped model, which was trained through 2025).
+
+**Method** (mirrors the 2024 `compare_fantasypros`): for each scored week ×
+position, compare the FP top-10 board against OUR logged pre-kickoff
+predictions (the clean live record in `holdout_log.jsonl`) on the overlapping
+players; actuals from `features.parquet`; ESPN Standard (non-PPR) points. Both
+sides are pre-week commitments. n = 358 player-weeks (1,372 raw-stat rows).
+
+**Result — we beat the consensus, modest but real:**
+- **Pooled:** points MAE **6.05 vs 6.22**, RMSE **7.57 vs 7.61**, Spearman
+  **+0.534 vs +0.512** — we win 3 of 4 positions on each.
+- **By position (pts MAE / pts Spearman / top-5 mean actual, ours vs FP):**
+  - QB  5.98/6.37 · +0.448/+0.369 · 20.24/20.42 (top-5 near-tie, FP edges us)
+  - RB  6.66/6.98 · +0.300/+0.297 · 18.73/18.62 (we win all three)
+  - WR  6.96/6.71 · +0.116/+0.139 · 14.43/14.13 (we TRAIL MAE+Spearman; win top-5)
+  - TE  4.63/4.85 · +0.321/+0.206 · 9.16/8.62 (we win all three)
+- **Weekly:** we win MAE in 6 of 9 weeks (lose w5/w8/w9) and Spearman in 6 of 9
+  (lose w2/w5/w9); w10 is a clean sweep (MAE 6.50 vs 7.74, Rho +0.811 vs +0.691).
+- **Raw components (apples-to-apples):** pooled MAE 12.27 vs 12.49 (we win);
+  we win QB/TE, trail RB/WR by a hair.
+
+**Read:** same shape as the 2024 finding — the "beat the consensus" claim holds
+on signal/quality (ranking + error), not as a blowout. The one real weakness is
+**WR** (we trail FP on every WR metric). The FP free tier caps at top-10/position,
+so this is a top-10 head-to-head, not a full-roster one.
+
+**Repro:** `uv run python -m src.fetch_fantasypros --season 2026 --weeks 1 2 3 4 5 7 8 9 10`
+then `uv run python notebooks/_fp_2026_scoreboard.py` → `models/fantasypros_2026_report.json`
+(+ `notebooks/fp_2026_scoreboard.html` via `notebooks/_gen_fp_2026_html.py`).
 
 ## Third-party LLM feedback review — claim audit + A/B (2026-10-22)
 

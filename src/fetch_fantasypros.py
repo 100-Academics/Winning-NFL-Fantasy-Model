@@ -18,9 +18,11 @@ Run:  uv run python -m src.fetch_fantasypros
 """
 from __future__ import annotations
 
+import argparse
 import json
 import os
 import pathlib
+import sys
 import time
 
 import requests
@@ -68,16 +70,25 @@ def _fetch(session: requests.Session, key: str, season: int, week: int,
     raise RuntimeError(f"fetch failed {season} w{week} {pos}: {last_err!r}")
 
 
-def main() -> None:
+def main(argv: list[str] | None = None) -> None:
+    ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument("--season", type=int, default=None,
+                    help="single season to fetch (default: all of SEASONS)")
+    ap.add_argument("--weeks", type=int, nargs="*", default=None,
+                    help="specific weeks to fetch (default: all of WEEKS)")
+    args = ap.parse_args(argv)
+    seasons = [args.season] if args.season else SEASONS
+    weeks = sorted(set(args.weeks)) if args.weeks else WEEKS
+
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
     key = _load_api_key()
     session = requests.Session()
     session.headers.update({"Accept": "application/json", "x-api-key": key})
 
-    total = len(SEASONS) * len(WEEKS) * len(POSITIONS)
+    total = len(seasons) * len(weeks) * len(POSITIONS)
     done = 0
-    for season in SEASONS:
-        for week in WEEKS:
+    for season in seasons:
+        for week in weeks:
             for pos in POSITIONS:
                 path = _cache_path(season, week, pos)
                 if path.exists() and path.stat().st_size > 0:
@@ -93,4 +104,4 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    main(sys.argv[1:])
