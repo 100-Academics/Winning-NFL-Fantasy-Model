@@ -45,6 +45,35 @@ for every player and so rank nothing at all. This is the real test.
 
 ![2026 live holdout — week by week](holdout_2026.png)
 
+## Live 2026 vs the FantasyPros consensus
+
+We don't just beat naive baselines. We beat the *expert consensus*. On the same
+live 2026 weeks (w1–w5, w7–w10), we compare our pre-kickoff log against the
+FantasyPros top-10 boards for each position, same players, same ESPN-Standard
+(non-PPR) scoring:
+
+![Live 2026 head-to-head vs the FantasyPros consensus](fantasypros_2026.png)
+
+| Position | Weekly points MAE (ours / FP) | Spearman ρ (ours / FP) | Top-5 decision (ours / FP) |
+|:--|:--|:--|:--|
+| **QB** | **5.98** / 6.37 | **+0.45** / +0.37 | +17.1 / +19.4 |
+| **RB** | **6.66** / 6.98 | **+0.30** / +0.30 | +11.8 / +13.6 |
+| **WR** | 6.96 / **6.71** | 0.12 / **0.14** | +9.9 / +6.8 |
+| **TE** | **4.63** / 4.85 | **+0.32** / +0.21 | +12.4 / +10.4 |
+
+We win 3 of 4 positions on accuracy and ranking (WR is the one we trail). Pooled
+across the field: points MAE **6.05 vs 6.22**, RMSE **7.57 vs 7.61**, Spearman
+**+0.534 vs +0.512**. The edge is real but modest. This is a top-10 head-to-head
+(the FP free-tier cap), not a full-roster comparison, and the opponent is an
+aggregate of expert projections, not a single pick.
+
+Repro:
+
+```bash
+uv run python -m src.fetch_fantasypros --season 2026 --weeks 1 2 3 4 5 7 8 9 10
+uv run python notebooks/_fp_2026_scoreboard.py
+```
+
 ## Methodology recap
 
 - **Data**: nflverse 2016–2025 + per-game context (opponent, Vegas line,

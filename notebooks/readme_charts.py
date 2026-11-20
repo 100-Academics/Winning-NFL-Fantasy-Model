@@ -209,13 +209,85 @@ def chart_live(holdout: dict):
     plt.close(fig)
 
 
+# ======================================================================
+# Chart 3 — live 2026 head-to-head vs the FantasyPros consensus
+# ======================================================================
+def chart_fantasypros(fp: dict):
+    pos = fp["per_position"]
+    order = ["QB", "RB", "WR", "TE"]
+    data = []
+    for p in order:
+        if p not in pos:
+            continue
+        d = pos[p]
+        data.append({
+            "pos": p,
+            "o_mae": d["points_ours"]["mae"], "f_mae": d["points_fp"]["mae"],
+            "o_rho": d["points_ours"]["spearman"], "f_rho": d["points_fp"]["spearman"],
+            "win_mae": d["points_ours"]["mae"] < d["points_fp"]["mae"],
+            "win_rho": d["points_ours"]["spearman"] > d["points_fp"]["spearman"],
+        })
+    n_win = sum(1 for r in data if r["win_mae"])
+    fig = plt.figure(figsize=(12.2, 6.3))
+    _head(fig, f"Beats the FantasyPros consensus on {n_win} of {len(data)} positions",
+          "Live 2026 OOS (w1–w5, w7–w10) · top-10/position head-to-head · "
+          "ESPN Standard (non-PPR) · dimmed = we trail")
+    gs = fig.add_gridspec(1, 2, left=0.075, right=0.975, top=0.79, bottom=0.17,
+                          wspace=0.20)
+    x = np.arange(len(data))
+    w = 0.36
+
+    def _pair(ax, o_vals, f_vals, win, fmt, title, ymax):
+        ax.bar(x - w/2, f_vals, width=w, color=TR3, zorder=3)
+        ax.bar(x + w/2, o_vals, width=w,
+               color=[MODEL if r else DIM for r in win], zorder=3)
+        peak = max(max(o_vals), max(f_vals))
+        for i, (ov, fv, wn) in enumerate(zip(o_vals, f_vals, win)):
+            ax.text(i - w/2, fv + peak*0.02, fmt.format(fv), ha="center",
+                    va="bottom", fontsize=8.5, color=MUTED)
+            ax.text(i + w/2, ov + peak*0.02, fmt.format(ov), ha="center",
+                    va="bottom", fontsize=8.5, color=INK if wn else MUTED,
+                    fontweight="bold" if wn else "normal")
+        ax.set_xticks(x); ax.set_xticklabels([r["pos"] for r in data], fontsize=10.5)
+        ax.yaxis.set_visible(False)
+        ax.set_ylim(0, ymax)
+        _clean(ax, x_axis=True)
+        ax.set_title(title, fontsize=10, color=MUTED, pad=10, loc="left")
+
+    o_mae = [r["o_mae"] for r in data]; f_mae = [r["f_mae"] for r in data]
+    o_rho = [r["o_rho"] for r in data]; f_rho = [r["f_rho"] for r in data]
+    ax = fig.add_subplot(gs[0])
+    _pair(ax, o_mae, f_mae, [r["win_mae"] for r in data],
+          "{:.2f}", "accuracy · weekly points MAE (lower = better)",
+          max(max(o_mae), max(f_mae))*1.30)
+    ax2 = fig.add_subplot(gs[1])
+    _pair(ax2, o_rho, f_rho, [r["win_rho"] for r in data],
+          "{:+.2f}", "ranking · weekly Spearman ρ (higher = better)",
+          max(max(o_rho), max(f_rho))*1.30)
+
+    # single amber callout on the biggest MAE win, in clear headroom
+    best = max((r for r in data if r["win_mae"]),
+               key=lambda r: r["f_mae"] - r["o_mae"])
+    bi = next(i for i, r in enumerate(data) if r["pos"] == best["pos"])
+    ax.text(bi + w/2, max(max(o_mae), max(f_mae))*1.12,
+            f"biggest edge  {best['pos']}  −{(best['f_mae']-best['o_mae'])/best['f_mae']*100:.0f}% MAE",
+            ha="center", va="bottom", fontsize=9, color=AMBER, fontweight="bold")
+    fig.savefig(DOCS / "fantasypros_2026.png", dpi=150, facecolor=BG)
+    plt.close(fig)
+
+
 def main():
     report = json.loads((ROOT / "models" / "eval_report.json").read_text(encoding="utf-8"))
     holdout = json.loads((ROOT / "models" / "holdout_score.json").read_text(encoding="utf-8"))
     chart_holdout(report)
     chart_live(holdout)
+    fp_path = ROOT / "models" / "fantasypros_2026_report.json"
+    if fp_path.exists():
+        chart_fantasypros(json.loads(fp_path.read_text(encoding="utf-8")))
     print("wrote:", (DOCS / "mae_vs_baselines.png").resolve())
     print("wrote:", (DOCS / "holdout_2026.png").resolve())
+    if (DOCS / "fantasypros_2026.png").exists():
+        print("wrote:", (DOCS / "fantasypros_2026.png").resolve())
 
 
 if __name__ == "__main__":
