@@ -16,7 +16,7 @@
 
 ![Week 11, 2026 board — hero](docs/week11_board_hero.png)
 
-[View the full board — all positions + the 26-team D/ST →](docs/RESULTS.md)
+### 📋 [View the full board — all 10 positions + the 26-team D/ST →](docs/RESULTS.md)
 
 </div>
 
