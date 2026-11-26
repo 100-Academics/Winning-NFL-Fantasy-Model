@@ -6,9 +6,9 @@ Per-player weekly NFL fantasy stat projection (passing / rushing / receiving com
 [![pandas + scikit-learn](https://img.shields.io/badge/stack-pandas%20%7C%20scikit--learn-0969da?style=flat-square)](pyproject.toml)
 [![License: GPL-3.0](https://img.shields.io/badge/license-GPL--3.0-1a7f37?style=flat-square)](LICENSE)
 
-<img alt="Week 11, 2026 board, hero view" src="docs/week11_board_hero.png" width="840">
+<img alt="Week 12, 2026 board, hero view" src="docs/week12_board_hero.png" width="840">
 
-Live Week 11, 2026 board (top of the board). Full board: all 10 positions + the 26-team D/ST, with charts and methodology: [docs/RESULTS.md](docs/RESULTS.md).
+Live Week 12, 2026 board (top of the board). Full board: all 10 positions + the 26-team D/ST, with charts and methodology: [docs/RESULTS.md](docs/RESULTS.md).
 
 ## Highlights
 
@@ -55,24 +55,24 @@ models/calibration_report.json       # signed bias per position + by predicted d
 ## Benchmarks
 
 > [!NOTE]
-> Numbers below are the verified runs re-executed 2026-11-19 on the cached holdouts. Every per-player model is fit on **2016–2023** and validated on **2024**; the clean holdout is **2025** (the model is never fit on 2025) and **2026 is the live out-of-sample season** (logged pre-kickoff, scored after the games). Baselines are the **last-game** and **trailing-3-game** averages on the same weeks and same players. Selection metric is **per-stat MAE and Spearman rank correlation**: MAE alone hides the systematic over/under-projection that distorts flex and start/sit. Re-run `src.bench`, `src.calibrate`, and the holdout scorers after any model change.
+> Numbers below are the verified runs re-executed 2026-11-25 on the cached holdouts. Every per-player model is fit on **2016–2023** and validated on **2024**; the clean holdout is **2025** (the model is never fit on 2025) and **2026 is the live out-of-sample season** (logged pre-kickoff, scored after the games). Baselines are the **last-game** and **trailing-3-game** averages on the same weeks and same players. Selection metric is **per-stat MAE and Spearman rank correlation**: MAE alone hides the systematic over/under-projection that distorts flex and start/sit. Re-run `src.bench`, `src.calibrate`, and the holdout scorers after any model change.
 
 ### Per-stat components (2025 clean holdout)
 
 | Stat | Model MAE | last-game MAE | trailing-3 MAE | Spearman ρ |
 | --- | ---: | ---: | ---: | ---: |
-| QB passing yards | **53.8** | 81.0 | 75.5 | 0.62 |
-| QB passing TDs | **0.78** | 1.06 | 0.94 | 0.50 |
-| RB rushing yards | **16.7** | 23.6 | 20.6 | **0.80** |
-| RB rushing TDs | **0.32** | 0.35 | 0.32 | 0.39 |
-| RB receptions | **1.02** | 1.17 | 1.06 | 0.65 |
-| RB receiving yards | **9.77** | 11.4 | 9.87 | 0.56 |
-| WR receptions | **1.10** | 1.63 | 1.44 | 0.78 |
-| WR receiving yards | **18.1** | 24.5 | 21.8 | 0.72 |
-| TE receptions | **0.98** | 1.55 | 1.33 | 0.75 |
-| TE receiving yards | **12.8** | 18.5 | 15.8 | 0.70 |
+| QB passing yards | **54.1** | 81.0 | 75.5 | 0.61 |
+| QB passing TDs | **0.78** | 1.1 | 0.94 | 0.50 |
+| RB rushing yards | **16.7** | 23.5 | 20.5 | **0.79** |
+| RB rushing TDs | **0.32** | 0.3 | 0.32 | 0.40 |
+| RB receptions | **1.02** | 1.2 | 1.05 | 0.65 |
+| RB receiving yards | **9.7** | 11.3 | 9.8 | 0.56 |
+| WR receptions | **1.09** | 1.6 | 1.44 | 0.78 |
+| WR receiving yards | **18.0** | 24.5 | 21.8 | 0.72 |
+| TE receptions | **0.98** | 1.5 | 1.33 | 0.74 |
+| TE receiving yards | **12.9** | 18.5 | 15.8 | 0.70 |
 
-12 of the 16 stat models beat *both* naive baselines on MAE; the edge is largest on the headline yardage (QB passing 53.8 vs 81.0 / 75.5). The 4 that don't win are the ultra-sparse TD / INT counts, where "last week was 0" is a strong null. Spearman rank correlation is positive on all 16 stats. Full per-stat breakdown in `models/eval_report.json`.
+12 of the 16 stat models beat *both* naive baselines on MAE; the edge is largest on the headline yardage (QB passing 54.1 vs 81.0 / 75.5). The 4 that don't win are the ultra-sparse TD / INT counts, where "last week was 0" is a strong null. Spearman rank correlation is positive on all 16 stats. Full per-stat breakdown in `models/eval_report.json`.
 
 ### Live 2026: weekly pooled points MAE vs baselines
 
@@ -87,8 +87,9 @@ models/calibration_report.json       # signed bias per position + by predicted d
 | W8 | 289 | 4.28 | 4.35 | **3.86** |
 | W9 | 337 | **3.37** | 4.27 | 3.66 |
 | W10 | 299 | **3.46** | 4.66 | 4.08 |
+| W11 | 294 | **3.01** | 4.61 | 3.76 |
 
-Beats both baselines on MAE in **7 of 9** scored weeks (W7 and W8 are the two losses, both to trailing-3). It also produces a real ranking (Spearman **0.67–0.76** against actuals per position) while the naive baselines are a single constant for every player and so rank nothing at all.
+Beats both baselines on MAE in **8 of 10** scored weeks (W7 and W8 are the two losses, both to trailing-3). It also produces a real ranking (Spearman **0.67–0.76** against actuals per position) while the naive baselines are a single constant for every player and so rank nothing at all.
 
 ### Live 2026: head-to-head vs the FantasyPros consensus
 

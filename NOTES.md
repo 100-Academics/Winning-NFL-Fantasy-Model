@@ -527,6 +527,49 @@ has been replaced. Diagnosis + fix, A/B'd so we don't redo it:
 - Data refresh: 10/11 datasets updated; only the expected `participation`
   [FAIL] (nflreadpy season range caps at 2025) — the 2026-09-29 file stays.
 
+## Live 2026 holdout — W11 scored, W12 logged (2026-11-25)
+- **Context:** W11 was originally logged pre-kickoff 2026-11-17 (scheduled-panel
+  fallback, 470 offense / 26 D/ST) but never scored. This cycle: full data
+  refresh (`--force`; W11 actuals landed) + `src.features` rebuild + replay
+  `--log` with the **frozen V6 model** (features strictly prior-week; the log
+  path never sees target-week outcomes), then scored the same day. No model
+  change — the standing decision rule was not invoked.
+- **Offense (294 replay-logged + scored, ESPN Standard):**
+  - Model **MAE 3.01** vs last-game 4.61 / trailing-3 3.76; Spearman
+    model **+0.729** vs tr3 +0.618 / last +0.535. Best ranking week and
+    lowest MAE of the season so far.
+  - Season trend: w1 +0.682 → w2 +0.759 → w3 +0.786 → w4 +0.786 → w5 +0.727 →
+    (w6 skipped) → w7 +0.688 → w8 +0.678 → w9 +0.718 → w10 +0.701 →
+    **w11 +0.729**.
+  - MAE record: beats both baselines in **8 of 10** scored weeks (W7 and W8
+    remain the two losses, both to trailing-3).
+- **D/ST (26 teams scored):** Spearman **+0.486**, top-5 gap **+6.15**
+  (top-5 mean 11.20 vs rest 5.05); top-5 actual ranks **1 / 4 / 5 / 6 / 15**.
+  HOU (board #4, allowed 3, 3 TOs) finished actual rank 1; KC, BUF, DEN
+  landed actual 6/5/4; only PIT (board #5, allowed 19) missed (actual 15).
+  Gap trend: w3 −1.51 → w4 +2.69 → w5 +3.96 → w7 −0.55 → w8 +7.15 →
+  w9 +6.72 → w10 +3.91 → **w11 +6.15**.
+- **Week 12 (logged pre-kickoff 2026-11-25T21:42; games Nov 25–30):**
+  offense **892 players**, D/ST **32 teams** (scheduled-panel path; W11
+  actuals in features, W12 rows absent as expected). Boards:
+  `notebooks/w12_board.html` + `models/w12_board.json` (self-contained dark
+  theme — the board CSS now defines its own `:root` vars; screenshots at
+  2× device scale). W12 D/ST top-5: **DEN (vs PIT, 16.5 imp), NE (vs LAC,
+  17.0), MIN (vs ATL, 17.2), WAS (vs ARI, 17.2), JAX (vs TEN, 17.5)**;
+  sits: TEN (32.0 imp, vs JAX — the slate's strongest projected offense),
+  NO (29.8, vs CIN), DET (28.5, vs CHI), PHI (28.0, vs DAL), CHI (27.0,
+  vs BAL). One timing note: W12 opens with the GB–LA Wednesday game
+  (Nov 25, 2:00 ET), which kicked off just before the log timestamp — the
+  log path uses strictly pre-W12 features (scheduled panel), so no W12
+  outcome enters any prediction.
+- **Docs updated:** README hero + live table (W11 row, 8-of-10), RESULTS.md
+  W12 board + win count, `docs/mae_vs_baselines.png` + `docs/holdout_2026.png`
+  regenerated from the fresh `models/eval_report.json` (2025 table re-run
+  2026-11-25: QB passing 54.1 vs 81.0 / 75.5; 12/16 still beat both),
+  `docs/week12_board.png` + `docs/week12_board_hero.png` screenshots.
+- **Score after the games:** `uv run python -m src.holdout --season 2026 --week 12 --score`
+  and `uv run python -m src.holdout_def --season 2026 --week 12 --score`.
+
 ## Third-party audit #3 — live-path correctness fixes + NaN A/B (2026-11-19)
 
 A third-party LLM audited the model again (pasted as-is; focused on "two silent

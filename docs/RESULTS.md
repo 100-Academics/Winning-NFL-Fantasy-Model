@@ -8,18 +8,18 @@ where the evidence and methodology live. Agent working-notes and the A/B log:
 ## The product — a full-roster weekly board
 
 Every week the model projects all active players' stat components, converts them
-to ESPN Standard (non-PPR) points, and ranks them. Below is the live **Week 11,
+to ESPN Standard (non-PPR) points, and ranks them. Below is the live **Week 12,
 2026** board in full — top-10 per offensive position plus the D/ST matchup board
-for all 26 teams, with the most recently scored weeks recap'd at the top.
+for all 26 teams, with the most recently scored week (W11) recap'd at the top.
 
-![Week 11, 2026 board — full](week11_board.png)
+![Week 12, 2026 board — full](week12_board.png)
 
 ## Held-out accuracy (clean 2025)
 
 On the clean **2025 holdout** — the model was **never fit on 2025** — **12 of
 16** position-stat models beat *both* naive baselines (last-game and trailing-3
 average) on MAE. The edge is largest on headline yardage: QB passing yards MAE
-**53.8** vs **81.0 / 75.5** for the two baselines. The model's Spearman ranking
+**54.1** vs **81.0 / 75.5** for the two baselines. The model's Spearman ranking
 is positive on all 16 stats. The 4 that don't win on raw MAE are the
 ultra-sparse TD/INT counts, where "last week was 0" is a strong null.
 
@@ -39,7 +39,7 @@ p10/p90 bands stay quantile models. Signed-bias / calibration:
 2026 predictions are written to disk **before** kickoff and scored after the
 games — never re-fit on a week you are about to score (no in-sample leakage, no
 peeking at the answer). It beats **both** baselines on MAE in **7 of 9** scored
-weeks (W7 and W8 are the two losses). It also produces a real ranking — Spearman
+weeks — 8 of 10 with W11 (W7 and W8 are the two losses). It also produces a real ranking — Spearman
 **0.67–0.76** against actuals — while the naive baselines are a single constant
 for every player and so rank nothing at all. This is the real test.
 
